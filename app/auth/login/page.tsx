@@ -101,12 +101,13 @@ export default function LoginPage() {
   }
 
   useEffect(() => {
-    // console.clear()
-    console.log("isAuthenticated", isAuthenticated)
-    console.log("user", user)
-    console.log("authLoading", authLoading)
-    console.log("authError", authError)
-  }, [user, authLoading, authError, isAuthenticated])
+    if (authLoading) return;
+    if (!user) {
+      router.push("/auth/login");
+      return;
+    }
+    // Yönlendirme kaldırıldı, kullanıcı anasayfada kalabilir
+  }, [user, authLoading, router]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100 flex items-center justify-center p-4">

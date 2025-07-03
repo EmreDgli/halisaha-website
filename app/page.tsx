@@ -70,16 +70,7 @@ export default function HomePage() {
       router.push("/auth/login");
       return;
     }
-    const roles = user.profile?.roles || [];
-    console.log("roles:", roles);
-    if (roles.length === 1) {
-      if (roles.includes("player")) {
-        router.push("/dashboard/player");
-      } else if (roles.includes("field_owner")) {
-        router.push("/dashboard/owner");
-      }
-    }
-    // 2 rol varsa, kullanıcıya seçim ekranı göster
+    // Kullanıcı giriş yaptıysa, anasayfada kalabilir. Panel yönlendirmesi yapılmaz.
   }, [user, loading, router]);
 
   return (
