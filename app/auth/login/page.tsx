@@ -115,13 +115,6 @@ export default function LoginPage() {
       } finally {
         setLoadingTeams(false)
       }
-
-      if (data) {
-        // ... userMatches.push(...)
-        localStorage.setItem("userMatches", JSON.stringify(userMatches))
-        // router.push("/dashboard/player") yerine:
-        router.push(`/matches/${userMatches[userMatches.length - 1].id}/details`)
-      }
     } catch (error) {
       console.error("Login error:", error)
       setErrors({ general: "Bir hata oluştu. Lütfen tekrar deneyin." })
