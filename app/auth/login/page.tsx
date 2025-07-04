@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { use } from "react"
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
@@ -10,10 +11,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Eye, EyeOff, Mail, Lock, ArrowLeft, Home } from "lucide-react"
+import { Eye, EyeOff, Mail, Lock, ArrowLeft, Home, Calendar } from "lucide-react"
 import { loginUser } from "@/lib/api/auth"
 import { useAuthContext } from "@/components/AuthProvider"
 import Cookies from "js-cookie"
+import { getUserTeams } from "@/lib/api/teams"
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
@@ -25,6 +27,8 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter();
   const { user, loading: authLoading, error: authError, isAuthenticated } = useAuthContext()
+  const [userTeams, setUserTeams] = useState<{ id: string; name: string }[]>([])
+  const [loadingTeams, setLoadingTeams] = useState(true)
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {}
@@ -90,6 +94,33 @@ export default function LoginPage() {
 
       if (data?.user && data?.user?.access_token) {
         Cookies.set("auth-token", data.user.access_token, { path: "/" })
+      }
+
+      // Load user teams
+      try {
+        const { data: teamsData, error: teamsError } = await getUserTeams()
+        if (teamsError) {
+          console.error("Error loading teams:", teamsError)
+        } else if (teamsData) {
+          setUserTeams(
+            teamsData.map((team: any) => ({
+              id: String(team.team_id || Date.now()),
+              name: team.team_name,
+              // city: team.city, // eğer city varsa ekle
+            }))
+          )
+        }
+      } catch (error) {
+        console.error("Error loading teams:", error)
+      } finally {
+        setLoadingTeams(false)
+      }
+
+      if (data) {
+        // ... userMatches.push(...)
+        localStorage.setItem("userMatches", JSON.stringify(userMatches))
+        // router.push("/dashboard/player") yerine:
+        router.push(`/matches/${userMatches[userMatches.length - 1].id}/details`)
       }
     } catch (error) {
       console.error("Login error:", error)

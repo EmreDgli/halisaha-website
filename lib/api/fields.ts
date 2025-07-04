@@ -215,6 +215,17 @@ export async function getOwnerFields() {
   }
 }
 
+// Saha rezervasyonlarını getir
+export async function getFieldReservations(fieldId: string) {
+  const { data, error } = await supabase
+    .from("reservations")
+    .select("*")
+    .eq("field_id", fieldId)
+    .order("start_time", { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
 // Frontend usage examples:
 /*
 // Create field

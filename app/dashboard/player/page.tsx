@@ -27,6 +27,7 @@ import { logoutUser } from "@/lib/api/auth"
 import { getUserTeams } from "@/lib/api/teams"
 import { getUserMatches } from "@/lib/api/matches"
 import { useAuthContext } from "@/components/AuthProvider"
+import React from "react"
 
 interface Team {
   id: string
@@ -38,6 +39,7 @@ interface Team {
   member_count?: number
   role?: string
   created_at?: string
+  owner_id?: string
 }
 
 interface Match {
@@ -169,6 +171,10 @@ export default function PlayerDashboard() {
 
   const pendingRequests = joinRequests.filter((req) => req.status === "pending")
 
+  // myTeams dizisini ikiye ayır
+  const ownedTeams = myTeams.filter(team => team.owner_id === user.id)
+  const memberTeams = myTeams.filter(team => team.owner_id !== user.id)
+
   // Show loading state
   if (authLoading) {
     return (
@@ -218,6 +224,17 @@ export default function PlayerDashboard() {
               </h1>
             </div>
             <div className="flex items-center space-x-4">
+              {/* Panel geçiş butonu */}
+              {user?.profile?.roles?.includes("player") && user?.profile?.roles?.includes("field_owner") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-green-600 text-green-700 hover:bg-green-50"
+                  onClick={() => router.push("/dashboard/owner")}
+                >
+                  Saha Sahibi Paneline Geç
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -362,10 +379,11 @@ export default function PlayerDashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {myTeams.length > 0 ? (
-                myTeams.map((team) => (
+              <h3 className="font-semibold mt-2 mb-1 text-green-800">Oluşturduğum Takımlar</h3>
+              {ownedTeams.length > 0 ? (
+                ownedTeams.map((team, index) => (
                   <div
-                    key={team.id}
+                    key={team.id || team.name || index}
                     className="flex items-center justify-between p-4 bg-green-50 rounded-lg border border-green-200"
                   >
                     <div>
@@ -392,16 +410,40 @@ export default function PlayerDashboard() {
                   </div>
                 ))
               ) : (
-                <div className="text-center py-8">
-                  <Users className="h-12 w-12 mx-auto text-green-400 mb-4" />
-                  <p className="text-green-600 mb-4">Henüz takımınız yok</p>
-                  <Link href="/teams/create">
-                    <Button className="bg-green-600 hover:bg-green-700 text-white">
-                      <Plus className="h-4 w-4 mr-2" />
-                      İlk Takımınızı Oluşturun
-                    </Button>
-                  </Link>
-                </div>
+                <div className="text-green-600 text-sm">Henüz oluşturduğunuz takım yok.</div>
+              )}
+              <h3 className="font-semibold mt-6 mb-1 text-green-800">Katıldığım Takımlar</h3>
+              {memberTeams.length > 0 ? (
+                memberTeams.map((team, index) => (
+                  <div
+                    key={team.id || team.name || index}
+                    className="flex items-center justify-between p-4 bg-green-50 rounded-lg border border-green-200"
+                  >
+                    <div>
+                      <h4 className="font-medium text-green-800">{team.name}</h4>
+                      <p className="text-sm text-green-600">
+                        {team.role || "Üye"} • {team.member_count || 1} üye
+                      </p>
+                      <p className="text-sm text-green-500">
+                        {team.city} {team.district && `• ${team.district}`}
+                      </p>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Badge className="bg-green-600 text-white">{team.role || "Üye"}</Badge>
+                      <Link href={`/teams/${team.id}/manage`}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-green-300 text-green-700 hover:bg-green-100"
+                        >
+                          Yönet
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-green-600 text-sm">Henüz katıldığınız takım yok.</div>
               )}
             </CardContent>
           </Card>

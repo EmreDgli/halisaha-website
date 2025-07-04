@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, use } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -23,7 +23,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 
 interface Match {
-  id: number
+  id: string
   homeTeam: string
   awayTeam: string
   date: string
@@ -46,7 +46,8 @@ interface Player {
   joinedAt: string
 }
 
-export default function MatchDetailsPage({ params }: { params: { id: string } }) {
+export default function MatchDetailsPage({ params }: { params: any }) {
+  const { id } = use(params) as any
   const [match, setMatch] = useState<Match | null>(null)
   const [players, setPlayers] = useState<Player[]>([])
   const router = useRouter()
@@ -54,7 +55,9 @@ export default function MatchDetailsPage({ params }: { params: { id: string } })
   useEffect(() => {
     // Load match details from localStorage
     const storedMatches = JSON.parse(localStorage.getItem("userMatches") || "[]")
-    const foundMatch = storedMatches.find((m: Match) => m.id === Number.parseInt(params.id))
+    console.log("[DEBUG] storedMatches:", storedMatches)
+    console.log("[DEBUG] params.id:", id)
+    const foundMatch = storedMatches.find((m: Match) => m.id === String(id))
 
     if (foundMatch) {
       setMatch(foundMatch)
@@ -103,7 +106,7 @@ export default function MatchDetailsPage({ params }: { params: { id: string } })
         },
       ])
     }
-  }, [params.id])
+  }, [id])
 
   if (!match) {
     return (

@@ -70,8 +70,13 @@ export default function CreateMatchPage() {
         if (teamsError) {
           console.error("Error loading teams:", teamsError)
         } else if (teamsData) {
-          console.log("Takımlarım:", teamsData)
-          setUserTeams(teamsData)
+          setUserTeams(
+            teamsData.map((team: any) => ({
+              id: team.team_id,
+              name: team.team_name,
+              // city: team.city, // eğer city varsa ekle
+            }))
+          )
         }
       } catch (error) {
         console.error("Error loading teams:", error)
@@ -155,8 +160,25 @@ export default function CreateMatchPage() {
       }
 
       if (data) {
-        console.log("Match created successfully:", data)
-        router.push("/dashboard/player")
+        // Yeni maçı localStorage'a ekle
+        const userMatches = JSON.parse(localStorage.getItem("userMatches") || "[]")
+        const newMatchId = String(data.id || crypto.randomUUID())
+        userMatches.push({
+          id: newMatchId,
+          homeTeam: userTeams.find(t => t.id === formData.myTeam)?.name || "Takımım",
+          awayTeam: formData.opponentTeam || "Rakip",
+          date: formData.date,
+          time: formData.time,
+          field: availableFields.find(f => f.id === formData.field)?.name || "Saha",
+          status: "pending",
+          matchType: formData.matchType,
+          duration: formData.duration,
+          matchFee: formData.entryFee,
+          notes: formData.notes,
+          createdBy: "me"
+        })
+        localStorage.setItem("userMatches", JSON.stringify(userMatches))
+        router.push(`/matches/${newMatchId}/details`)
       }
     } catch (error) {
       console.error("Match creation error:", error)

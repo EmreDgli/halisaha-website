@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, use } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -24,7 +24,7 @@ import {
 import Link from "next/link"
 
 interface Team {
-  id: number
+  id: string
   name: string
   description?: string
   city?: string
@@ -52,15 +52,20 @@ interface TeamMember {
   lastSeen?: string
 }
 
-export default function TeamManagePage({ params }: { params: { id: string } }) {
+export default function TeamManagePage({ params }: { params: any }) {
+  const { id } = use(params) as any
   const [team, setTeam] = useState<Team | null>(null)
   const [members, setMembers] = useState<TeamMember[]>([])
   const [searchTerm, setSearchTerm] = useState("")
 
   useEffect(() => {
     // Load team details from localStorage
-    const storedTeams = JSON.parse(localStorage.getItem("userTeams") || "[]")
-    const foundTeam = storedTeams.find((t: Team) => t.id === Number.parseInt(params.id))
+    const userTeamsRaw = localStorage.getItem("userTeams");
+    const storedTeams = JSON.parse(!userTeamsRaw || userTeamsRaw === 'undefined' ? '[]' : userTeamsRaw);
+    console.log("[DEBUG] storedTeams:", storedTeams)
+    storedTeams.forEach((t: any, i: number) => console.log(`[DEBUG] storedTeams[${i}].id:`, t.id))
+    console.log("[DEBUG] params.id:", id)
+    const foundTeam = storedTeams.find((t: Team) => String(t.id) === String(id))
 
     if (foundTeam) {
       setTeam(foundTeam)
@@ -126,7 +131,7 @@ export default function TeamManagePage({ params }: { params: { id: string } }) {
         },
       ])
     }
-  }, [params.id])
+  }, [id])
 
   const filteredMembers = members.filter(
     (member) =>
@@ -209,7 +214,7 @@ export default function TeamManagePage({ params }: { params: { id: string } }) {
                   </div>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <Link href={`/chat/${team.id}`}>
+                  <Link href={`/chat/${id}`}>
                     <Button className="bg-green-600 hover:bg-green-700 text-white">
                       <MessageCircle className="w-4 h-4 mr-2" />
                       Takım Sohbeti
@@ -348,7 +353,7 @@ export default function TeamManagePage({ params }: { params: { id: string } }) {
                   <CardTitle className="text-lg text-green-800">Hızlı İşlemler</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <Link href={`/chat/${team.id}`}>
+                  <Link href={`/chat/${id}`}>
                     <Button
                       className="w-full bg-green-600 hover:bg-green-700 text-white"
                       onClick={() => console.log("Team chat clicked")}

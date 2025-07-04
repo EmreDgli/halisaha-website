@@ -1,12 +1,15 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Calendar, DollarSign, Plus, Clock, MapPin, Video, Upload, Eye, Star, Home } from "lucide-react"
 import Link from "next/link"
+import { getOwnerFields } from "@/lib/api/fields"
+import { logoutUser } from '@/lib/api/auth'
+import { useRouter } from 'next/navigation'
 
 interface MatchVideo {
   id: number
@@ -27,26 +30,10 @@ interface MatchVideo {
 }
 
 export default function OwnerDashboard() {
-  const [myFields] = useState([
-    {
-      id: 1,
-      name: "Merkez Halı Saha",
-      location: "Kadıköy, İstanbul",
-      hourlyRate: 200,
-      bookings: 15,
-      revenue: 3000,
-      status: "active",
-    },
-    {
-      id: 2,
-      name: "Spor Kompleksi",
-      location: "Beşiktaş, İstanbul",
-      hourlyRate: 250,
-      bookings: 22,
-      revenue: 5500,
-      status: "active",
-    },
-  ])
+  const [myFields, setMyFields] = useState<any[]>([])
+  const [fieldsLoading, setFieldsLoading] = useState(true)
+  const [fieldsError, setFieldsError] = useState("")
+  const router = useRouter()
 
   const [upcomingBookings] = useState([
     {
@@ -110,6 +97,28 @@ export default function OwnerDashboard() {
   const totalBookings = myFields.reduce((sum, field) => sum + field.bookings, 0)
   const totalVideoViews = myVideos.reduce((sum, video) => sum + video.views, 0)
 
+  useEffect(() => {
+    const loadFields = async () => {
+      setFieldsLoading(true)
+      setFieldsError("")
+      try {
+        const { data, error } = await getOwnerFields()
+        if (error) setFieldsError("Sahalar yüklenemedi.")
+        else setMyFields(data || [])
+      } catch (e) {
+        setFieldsError("Sahalar yüklenemedi.")
+      } finally {
+        setFieldsLoading(false)
+      }
+    }
+    loadFields()
+  }, [])
+
+  const handleLogout = async () => {
+    await logoutUser()
+    router.push("/")
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-gray-50">
       {/* Header */}
@@ -136,9 +145,31 @@ export default function OwnerDashboard() {
                 Anasayfa
               </Button>
             </Link>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={handleLogout}>
               Çıkış Yap
             </Button>
+            {/* Panel geçiş butonu */}
+            {typeof window !== 'undefined' && window.localStorage && (() => {
+              try {
+                const userStr = window.localStorage.getItem('currentUser');
+                if (userStr) {
+                  const user = JSON.parse(userStr);
+                  if (user?.roles?.includes("player") && user?.roles?.includes("field_owner")) {
+                    return (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-green-600 text-green-700 hover:bg-green-50"
+                        onClick={() => window.location.href = "/dashboard/player"}
+                      >
+                        Oyuncu Paneline Geç
+                      </Button>
+                    );
+                  }
+                }
+              } catch (e) {}
+              return null;
+            })()}
           </div>
         </div>
       </header>
@@ -330,58 +361,56 @@ export default function OwnerDashboard() {
               </Link>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-6">
-              {myFields.map((field) => (
-                <Card key={field.id} className="shadow-lg">
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between text-green-800">
-                      {field.name}
-                      <Badge variant="default" className="bg-green-100 text-green-700">
-                        Aktif
-                      </Badge>
-                    </CardTitle>
-                    <CardDescription>
-                      <MapPin className="w-4 h-4 inline mr-1" />
-                      {field.location}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Saatlik Ücret:</span>
-                        <span className="font-semibold">₺{field.hourlyRate}</span>
+            {fieldsLoading ? (
+              <div className="text-center text-green-600 py-8">Sahalar yükleniyor...</div>
+            ) : fieldsError ? (
+              <div className="text-center text-red-600 py-8">{fieldsError}</div>
+            ) : myFields.length === 0 ? (
+              <div className="text-center text-green-600 py-8">Henüz hiç saha eklemediniz.</div>
+            ) : (
+              <div className="grid md:grid-cols-2 gap-6">
+                {myFields.map((field) => (
+                  <Card key={field.id} className="shadow-lg">
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between text-green-800">
+                        {field.name}
+                        <Badge variant="default" className="bg-green-100 text-green-700">
+                          Aktif
+                        </Badge>
+                      </CardTitle>
+                      <CardDescription>
+                        <MapPin className="w-4 h-4 inline mr-1" />
+                        {field.address}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Saatlik Ücret:</span>
+                          <span className="font-semibold">₺{field.hourly_rate}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Açıklama:</span>
+                          <span className="font-semibold">{field.description}</span>
+                        </div>
+                        <div className="flex space-x-2 pt-2">
+                          <Link href={`/fields/${field.id}/edit`} className="flex-1">
+                            <Button size="sm" variant="outline" className="w-full">
+                              Düzenle
+                            </Button>
+                          </Link>
+                          <Link href={`/fields/${field.id}/reservations`} className="flex-1">
+                            <Button size="sm" variant="outline" className="w-full">
+                              Takvim
+                            </Button>
+                          </Link>
+                        </div>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Bu Ay Rezervasyon:</span>
-                        <span className="font-semibold">{field.bookings}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Bu Ay Gelir:</span>
-                        <span className="font-semibold text-green-600">₺{field.revenue.toLocaleString()}</span>
-                      </div>
-                      <div className="flex space-x-2 pt-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="flex-1"
-                          onClick={() => alert("Düzenleme özelliği yakında!")}
-                        >
-                          Düzenle
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="flex-1"
-                          onClick={() => alert("Takvim özelliği yakında!")}
-                        >
-                          Takvim
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </TabsContent>
 
           <TabsContent value="bookings" className="space-y-6">
