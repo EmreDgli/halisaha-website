@@ -93,9 +93,9 @@ export default function OwnerDashboard() {
     },
   ])
 
-  const totalRevenue = myFields.reduce((sum, field) => sum + field.revenue, 0)
-  const totalBookings = myFields.reduce((sum, field) => sum + field.bookings, 0)
-  const totalVideoViews = myVideos.reduce((sum, video) => sum + video.views, 0)
+  const totalRevenue = myFields.reduce((sum, field) => sum + (Number(field.revenue) || 0), 0)
+  const totalBookings = myFields.reduce((sum, field) => sum + (Number(field.bookings) || 0), 0)
+  const totalVideoViews = myVideos.reduce((sum, video) => sum + (Number(video.views) || 0), 0)
 
   useEffect(() => {
     const loadFields = async () => {
@@ -368,48 +368,52 @@ export default function OwnerDashboard() {
             ) : myFields.length === 0 ? (
               <div className="text-center text-green-600 py-8">Henüz hiç saha eklemediniz.</div>
             ) : (
-              <div className="grid md:grid-cols-2 gap-6">
-                {myFields.map((field) => (
-                  <Card key={field.id} className="shadow-lg">
-                    <CardHeader>
-                      <CardTitle className="flex items-center justify-between text-green-800">
-                        {field.name}
-                        <Badge variant="default" className="bg-green-100 text-green-700">
-                          Aktif
-                        </Badge>
-                      </CardTitle>
-                      <CardDescription>
-                        <MapPin className="w-4 h-4 inline mr-1" />
+            <div className="grid md:grid-cols-2 gap-6">
+              {myFields.map((field) => (
+                <Card key={field.id} className="shadow-lg">
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between text-green-800">
+                      {field.name}
+                      <Badge variant="default" className="bg-green-100 text-green-700">
+                        Aktif
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription>
+                      <MapPin className="w-4 h-4 inline mr-1" />
                         {field.address}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Saatlik Ücret:</span>
-                          <span className="font-semibold">₺{field.hourly_rate}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Açıklama:</span>
-                          <span className="font-semibold">{field.description}</span>
-                        </div>
-                        <div className="flex space-x-2 pt-2">
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-600">Saatlik Ücret:</span>
+                          <span className="font-semibold">₺{Number(field.hourly_rate) || 0}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-600">Şehir / İlçe:</span>
+                        <span className="font-semibold">{field.city || "-"} / {field.district || "-"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-600">Açıklama:</span>
+                        <span className="font-semibold">{field.description || "-"}</span>
+                      </div>
+                      <div className="flex space-x-2 pt-2">
                           <Link href={`/fields/${field.id}/edit`} className="flex-1">
                             <Button size="sm" variant="outline" className="w-full">
-                              Düzenle
-                            </Button>
+                          Düzenle
+                        </Button>
                           </Link>
                           <Link href={`/fields/${field.id}/reservations`} className="flex-1">
                             <Button size="sm" variant="outline" className="w-full">
-                              Takvim
-                            </Button>
+                          Takvim
+                        </Button>
                           </Link>
-                        </div>
                       </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
             )}
           </TabsContent>
 

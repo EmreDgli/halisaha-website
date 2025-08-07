@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { MapPin, Plus } from "lucide-react"
 import { createField } from "@/lib/api/fields"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 export default function CreateFieldPage() {
   const [form, setForm] = useState({
@@ -18,10 +19,20 @@ export default function CreateFieldPage() {
     district: "",
     hourlyRate: "",
     description: "",
+    fieldCount: "1",
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const router = useRouter()
+
+  // Türkiye şehir/ilçe örnek verisi
+  const cityDistricts: { [key: string]: string[] } = {
+    "Antalya": [
+      "Aksu", "Alanya", "Demre", "Döşemealtı", "Elmalı", "Finike", "Gazipaşa", "Gündoğmuş", "İbradı", "Kaş", "Kemer", "Kepez", "Konyaaltı", "Korkuteli", "Kumluca", "Manavgat", "Muratpaşa", "Serik"
+    ]
+  };
+  const cityOptions = Object.keys(cityDistricts);
+  const districtOptions = form.city && cityDistricts[form.city] ? cityDistricts[form.city] : [];
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value })
@@ -36,7 +47,10 @@ export default function CreateFieldPage() {
         name: form.name,
         address: form.address,
         hourly_rate: Number(form.hourlyRate),
-        description: `${form.city} / ${form.district}${form.description ? ' - ' + form.description : ''}`,
+        description: form.description,
+        field_count: Number(form.fieldCount),
+        city: form.city,
+        district: form.district,
       })
       router.push("/dashboard/owner")
     } catch (err: any) {
@@ -61,19 +75,41 @@ export default function CreateFieldPage() {
               <Label htmlFor="name" className="text-green-800">Saha Adı *</Label>
               <Input id="name" name="name" value={form.name} onChange={handleChange} required className="border-green-200 focus:border-green-500 focus:ring-green-500" />
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="city" className="text-green-800">Şehir *</Label>
+                <Select value={form.city} onValueChange={value => setForm({ ...form, city: value, district: "" })}>
+                  <SelectTrigger className="border-green-200 focus:border-green-500 focus:ring-green-500 appearance-none bg-none">
+                    <SelectValue placeholder="Şehir seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cityOptions.map(city => (
+                      <SelectItem key={city} value={city}>{city}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="district" className="text-green-800">İlçe *</Label>
+                <Select value={form.district} onValueChange={value => setForm({ ...form, district: value })} disabled={!form.city}>
+                  <SelectTrigger className="border-green-200 focus:border-green-500 focus:ring-green-500 appearance-none bg-none">
+                    <SelectValue placeholder="İlçe seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {districtOptions.map((district: string) => (
+                      <SelectItem key={district} value={district}>{district}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="address" className="text-green-800">Adres *</Label>
               <Input id="address" name="address" value={form.address} onChange={handleChange} required className="border-green-200 focus:border-green-500 focus:ring-green-500" />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="city" className="text-green-800">Şehir *</Label>
-                <Input id="city" name="city" value={form.city} onChange={handleChange} required className="border-green-200 focus:border-green-500 focus:ring-green-500" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="district" className="text-green-800">İlçe *</Label>
-                <Input id="district" name="district" value={form.district} onChange={handleChange} required className="border-green-200 focus:border-green-500 focus:ring-green-500" />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="fieldCount" className="text-green-800">Saha Sayısı *</Label>
+              <Input id="fieldCount" name="fieldCount" type="number" min="1" step="1" value={form.fieldCount} onChange={handleChange} required className="border-green-200 focus:border-green-500 focus:ring-green-500" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="hourlyRate" className="text-green-800">Saatlik Ücret (₺) *</Label>

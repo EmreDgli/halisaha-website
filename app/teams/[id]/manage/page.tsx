@@ -22,6 +22,9 @@ import {
   Trophy,
 } from "lucide-react"
 import Link from "next/link"
+import { useAuthContext } from "@/components/AuthProvider"
+import { getTeamJoinRequests, handleTeamJoinRequest, deleteTeam } from '@/lib/api/teams';
+import { useRouter } from 'next/navigation';
 
 interface Team {
   id: string
@@ -54,84 +57,81 @@ interface TeamMember {
 
 export default function TeamManagePage({ params }: { params: any }) {
   const { id } = use(params) as any
+  const { user } = useAuthContext()
   const [team, setTeam] = useState<Team | null>(null)
   const [members, setMembers] = useState<TeamMember[]>([])
   const [searchTerm, setSearchTerm] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [joinRequests, setJoinRequests] = useState<any[]>([]);
+  const router = useRouter();
 
   useEffect(() => {
+    const fetchTeam = async () => {
+      setLoading(true)
+      setError(null)
+      try {
     // Load team details from localStorage
-    const userTeamsRaw = localStorage.getItem("userTeams");
-    const storedTeams = JSON.parse(!userTeamsRaw || userTeamsRaw === 'undefined' ? '[]' : userTeamsRaw);
-    console.log("[DEBUG] storedTeams:", storedTeams)
-    storedTeams.forEach((t: any, i: number) => console.log(`[DEBUG] storedTeams[${i}].id:`, t.id))
-    console.log("[DEBUG] params.id:", id)
-    const foundTeam = storedTeams.find((t: Team) => String(t.id) === String(id))
+        const userTeamsRaw = localStorage.getItem("userTeams");
+        const storedTeams = JSON.parse(!userTeamsRaw || userTeamsRaw === 'undefined' ? '[]' : userTeamsRaw);
+        const foundTeam = storedTeams.find((t: Team) => String(t.id) === String(id))
 
     if (foundTeam) {
       setTeam(foundTeam)
-
-      // Mock team members data
-      setMembers([
-        {
-          id: 1,
-          name: "Ahmet Yılmaz",
-          position: "Orta Saha",
+          // Üyeler: Eğer team.members dizisi varsa onu kullan, yoksa owner'ı ekle
+          let dynamicMembers: TeamMember[] = []
+          if (Array.isArray(foundTeam.members) && foundTeam.members.length > 0) {
+            dynamicMembers = foundTeam.members.map((m: any, idx: number) => ({
+              id: m.id || idx + 1,
+              name: m.name || "Üye",
+              position: m.position || "Oyuncu",
+              role: m.role || "Oyuncu",
+              joinDate: m.joinDate || foundTeam.createdAt || "-",
+              matchesPlayed: m.matchesPlayed || 0,
+              goals: m.goals || 0,
+              assists: m.assists || 0,
+              online: m.online ?? false,
+              lastSeen: m.lastSeen || "-",
+            }))
+          } else {
+            // Sadece owner varsa, owner'ı üye olarak ekle
+            dynamicMembers = [
+              {
+                id: foundTeam.owner_id || (user && user.id) || 1,
+                name: (user && user.profile?.full_name) || "Takım Sahibi",
+                position: "Takım Sahibi",
           role: "Kaptan",
-          joinDate: "2023-01-15",
-          matchesPlayed: 25,
-          goals: 8,
-          assists: 12,
-          online: true,
-        },
-        {
-          id: 2,
-          name: "Mehmet Kaya",
-          position: "Forvet",
-          role: "Yardımcı Kaptan",
-          joinDate: "2023-02-20",
-          matchesPlayed: 23,
-          goals: 15,
-          assists: 6,
-          online: true,
-        },
-        {
-          id: 3,
-          name: "Ali Demir",
-          position: "Defans",
-          role: "Oyuncu",
-          joinDate: "2023-03-10",
-          matchesPlayed: 20,
-          goals: 2,
-          assists: 4,
-          online: false,
-          lastSeen: "2 saat önce",
-        },
-        {
-          id: 4,
-          name: "Can Özkan",
-          position: "Kaleci",
-          role: "Oyuncu",
-          joinDate: "2023-04-05",
-          matchesPlayed: 18,
+                joinDate: foundTeam.createdAt || "-",
+                matchesPlayed: 0,
           goals: 0,
-          assists: 1,
+                assists: 0,
           online: true,
-        },
-        {
-          id: 5,
-          name: "Emre Yıldız",
-          position: "Orta Saha",
-          role: "Oyuncu",
-          joinDate: "2023-05-12",
-          matchesPlayed: 15,
-          goals: 5,
-          assists: 8,
-          online: false,
-          lastSeen: "1 gün önce",
-        },
-      ])
+                lastSeen: "-",
+              },
+            ]
+          }
+          setMembers(dynamicMembers)
+        } else {
+          setError("Takım bulunamadı veya erişim hatası oluştu.")
+        }
+      } catch (err) {
+        setError("Takım bilgileri alınırken bir hata oluştu.")
+        console.error("Takım bilgileri alınırken hata:", err)
+      } finally {
+        setLoading(false)
+      }
     }
-  }, [id])
+    fetchTeam()
+  }, [id, user])
+
+  useEffect(() => {
+    if (!team) return;
+    const fetchJoinRequests = async () => {
+      const { data, error } = await getTeamJoinRequests(team.id);
+      if (!error && data) setJoinRequests(data);
+    };
+    fetchJoinRequests();
+  }, [team]);
 
   const filteredMembers = members.filter(
     (member) =>
@@ -141,12 +141,37 @@ export default function TeamManagePage({ params }: { params: any }) {
 
   const onlineMembers = members.filter((m) => m.online)
 
-  if (!team) {
+  // En iyi performanslar için üyelerden hesapla
+  const topGoalMember = members.length > 0 ? members.reduce((max, m) => m.goals > max.goals ? m : max, members[0]) : null
+  const topAssistMember = members.length > 0 ? members.reduce((max, m) => m.assists > max.assists ? m : max, members[0]) : null
+  const topMatchMember = members.length > 0 ? members.reduce((max, m) => m.matchesPlayed > max.matchesPlayed ? m : max, members[0]) : null
+
+  if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
           <p className="text-green-600">Takım bilgileri yükleniyor...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!team) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-green-600 mb-4">Takım bilgisi bulunamadı.</p>
         </div>
       </div>
     )
@@ -189,6 +214,12 @@ export default function TeamManagePage({ params }: { params: any }) {
               Anasayfa
             </Link>
           </div>
+          <div className="flex-1 flex justify-center">
+            <span className="text-2xl font-bold text-green-700">
+              {team ? team.name : "Takım ismi yükleniyor..."}
+            </span>
+          </div>
+          <div style={{ width: 120 }} /> {/* sağda boşluk için */}
         </div>
       </header>
 
@@ -404,35 +435,53 @@ export default function TeamManagePage({ params }: { params: any }) {
                 <CardContent className="space-y-4">
                   <div>
                     <h4 className="text-sm font-medium text-green-700 mb-2">En Çok Gol</h4>
+                    {topGoalMember ? (
                     <div className="flex items-center space-x-2">
                       <Avatar className="w-6 h-6">
-                        <AvatarFallback className="bg-green-200 text-green-700 text-xs">MK</AvatarFallback>
+                          <AvatarFallback className="bg-green-200 text-green-700 text-xs">
+                            {topGoalMember.name.split(" ").map((n) => n[0]).join("")}
+                          </AvatarFallback>
                       </Avatar>
-                      <span className="text-sm text-green-800">Mehmet Kaya</span>
-                      <Badge className="bg-green-100 text-green-700 text-xs">15 gol</Badge>
+                        <span className="text-sm text-green-800">{topGoalMember.name}</span>
+                        <Badge className="bg-green-100 text-green-700 text-xs">{topGoalMember.goals} gol</Badge>
                     </div>
+                    ) : (
+                      <div className="text-green-500 text-xs">Veri yok</div>
+                    )}
                   </div>
 
                   <div>
                     <h4 className="text-sm font-medium text-green-700 mb-2">En Çok Asist</h4>
+                    {topAssistMember ? (
                     <div className="flex items-center space-x-2">
                       <Avatar className="w-6 h-6">
-                        <AvatarFallback className="bg-green-200 text-green-700 text-xs">AY</AvatarFallback>
+                          <AvatarFallback className="bg-green-200 text-green-700 text-xs">
+                            {topAssistMember.name.split(" ").map((n) => n[0]).join("")}
+                          </AvatarFallback>
                       </Avatar>
-                      <span className="text-sm text-green-800">Ahmet Yılmaz</span>
-                      <Badge className="bg-green-100 text-green-700 text-xs">12 asist</Badge>
+                        <span className="text-sm text-green-800">{topAssistMember.name}</span>
+                        <Badge className="bg-green-100 text-green-700 text-xs">{topAssistMember.assists} asist</Badge>
                     </div>
+                    ) : (
+                      <div className="text-green-500 text-xs">Veri yok</div>
+                    )}
                   </div>
 
                   <div>
                     <h4 className="text-sm font-medium text-green-700 mb-2">En Çok Maç</h4>
+                    {topMatchMember ? (
                     <div className="flex items-center space-x-2">
                       <Avatar className="w-6 h-6">
-                        <AvatarFallback className="bg-green-200 text-green-700 text-xs">AY</AvatarFallback>
+                          <AvatarFallback className="bg-green-200 text-green-700 text-xs">
+                            {topMatchMember.name.split(" ").map((n) => n[0]).join("")}
+                          </AvatarFallback>
                       </Avatar>
-                      <span className="text-sm text-green-800">Ahmet Yılmaz</span>
-                      <Badge className="bg-green-100 text-green-700 text-xs">25 maç</Badge>
+                        <span className="text-sm text-green-800">{topMatchMember.name}</span>
+                        <Badge className="bg-green-100 text-green-700 text-xs">{topMatchMember.matchesPlayed} maç</Badge>
                     </div>
+                    ) : (
+                      <div className="text-green-500 text-xs">Veri yok</div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -467,6 +516,58 @@ export default function TeamManagePage({ params }: { params: any }) {
               </Card>
             </div>
           </div>
+
+          {/* Takım Ayarları ve Silme Butonu */}
+          <Card className="border-green-200 mt-8">
+            <CardHeader>
+              <CardTitle className="text-lg text-green-800">Takım Ayarları</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Diğer ayar alanları buraya eklenebilir */}
+              <Button
+                variant="outline"
+                className="border-red-200 text-red-600 hover:bg-red-50"
+                onClick={async () => {
+                  if (confirm('Takımı silmek istediğinize emin misiniz? Bu işlem geri alınamaz!')) {
+                    await deleteTeam(team.id);
+                    router.push('/dashboard/player');
+                  }
+                }}
+              >
+                Takımı Sil
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Katılma İstekleri */}
+          {joinRequests.length > 0 && (
+            <Card className="border-green-200 mt-8">
+              <CardHeader>
+                <CardTitle className="text-lg text-green-800">Katılma İstekleri</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {joinRequests.map((req) => (
+                  <div key={req.id} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <Avatar className="w-8 h-8">
+                        <AvatarFallback className="bg-orange-200 text-orange-700 text-xs">
+                          {req.user?.full_name?.split(' ').map((n: string) => n[0]).join('')}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-medium text-orange-800">{req.user?.full_name || 'Kullanıcı'}</p>
+                        <p className="text-sm text-orange-600">Katılma isteği</p>
+                      </div>
+                    </div>
+                    <div className="flex space-x-2">
+                      <Button size="sm" className="bg-green-600 text-white" onClick={async () => { await handleTeamJoinRequest(req.id, true); window.location.reload(); }}>Onayla</Button>
+                      <Button size="sm" className="bg-red-600 text-white" onClick={async () => { await handleTeamJoinRequest(req.id, false); window.location.reload(); }}>Reddet</Button>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>

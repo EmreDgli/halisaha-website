@@ -14,6 +14,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { createTeam } from "@/lib/api/teams"
 import { getCurrentUser } from "@/lib/api/auth"
+import { useAuthContext } from "@/components/AuthProvider"
 
 export default function CreateTeamPage() {
   const [formData, setFormData] = useState({
@@ -30,6 +31,7 @@ export default function CreateTeamPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const router = useRouter()
+  const { user } = useAuthContext()
 
   // Check authentication on mount
   useEffect(() => {
@@ -70,7 +72,7 @@ export default function CreateTeamPage() {
         city: formData.city,
         district: formData.district,
         skill_level: formData.skillLevel,
-        max_players: Number.parseInt(formData.maxMembers),
+        max_players: Number.parseInt(formData.maxMembers, 10),
       })
 
       if (error) {
@@ -81,6 +83,36 @@ export default function CreateTeamPage() {
 
       if (data) {
         console.log("Team created successfully:", data)
+        // Yeni takımı localStorage'a ekle
+        const userTeamsRaw = localStorage.getItem("userTeams");
+        const userTeams = JSON.parse(!userTeamsRaw || userTeamsRaw === 'undefined' ? '[]' : userTeamsRaw);
+        const newTeamId = String(data.id || crypto.randomUUID())
+        const newTeam = {
+          id: newTeamId,
+          name: formData.name,
+          city: formData.city,
+          district: formData.district,
+          skillLevel: formData.skillLevel,
+          description: formData.description,
+          owner_id: user?.id || "me",
+          createdAt: new Date().toISOString(),
+          members: [
+            {
+              id: user?.id || "me",
+              name: user?.profile?.full_name || "Takım Sahibi",
+              position: "Takım Sahibi",
+              role: "Kaptan",
+              joinDate: new Date().toISOString(),
+              matchesPlayed: 0,
+              goals: 0,
+              assists: 0,
+              online: true,
+              lastSeen: "-",
+            }
+          ]
+        }
+        userTeams.push(newTeam)
+        localStorage.setItem("userTeams", JSON.stringify(userTeams))
         router.push("/dashboard/player")
       }
     } catch (error) {
@@ -98,6 +130,11 @@ export default function CreateTeamPage() {
       </div>
     )
   }
+
+  // Antalya ve ilçeleri sabit listesi
+  const ANTALYA_DISTRICTS = [
+    "Aksu", "Alanya", "Demre", "Döşemealtı", "Elmalı", "Finike", "Gazipaşa", "Gündoğmuş", "İbradı", "Kaş", "Kemer", "Kepez", "Konyaaltı", "Korkuteli", "Kumluca", "Manavgat", "Muratpaşa", "Serik"
+  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100">
@@ -137,6 +174,7 @@ export default function CreateTeamPage() {
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                   {/* Team Logo Upload */}
+                  {/*
                   <div className="space-y-2">
                     <Label className="flex items-center text-green-800">
                       <Upload className="w-4 h-4 mr-2" />
@@ -148,6 +186,7 @@ export default function CreateTeamPage() {
                       <p className="text-sm text-green-600 mt-2">PNG, JPG formatında, maksimum 2MB</p>
                     </div>
                   </div>
+                  */}
 
                   {/* Team Name */}
                   <div className="space-y-2">
@@ -190,7 +229,7 @@ export default function CreateTeamPage() {
                       </Label>
                       <Select
                         value={formData.city}
-                        onValueChange={(value) => setFormData({ ...formData, city: value })}
+                        onValueChange={(value) => setFormData({ ...formData, city: value, district: "" })}
                       >
                         <SelectTrigger
                           className={`border-green-200 focus:border-green-500 focus:ring-green-500 ${errors.city ? "border-red-500" : ""}`}
@@ -198,14 +237,7 @@ export default function CreateTeamPage() {
                           <SelectValue placeholder="Şehir seçin" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="istanbul">İstanbul</SelectItem>
-                          <SelectItem value="ankara">Ankara</SelectItem>
-                          <SelectItem value="izmir">İzmir</SelectItem>
-                          <SelectItem value="bursa">Bursa</SelectItem>
-                          <SelectItem value="antalya">Antalya</SelectItem>
-                          <SelectItem value="adana">Adana</SelectItem>
-                          <SelectItem value="konya">Konya</SelectItem>
-                          <SelectItem value="gaziantep">Gaziantep</SelectItem>
+                          <SelectItem value="Antalya">Antalya</SelectItem>
                         </SelectContent>
                       </Select>
                       {errors.city && <p className="text-sm text-red-500">{errors.city}</p>}
@@ -214,13 +246,20 @@ export default function CreateTeamPage() {
                       <Label htmlFor="district" className="text-green-800">
                         İlçe
                       </Label>
-                      <Input
-                        id="district"
+                      <Select
                         value={formData.district}
-                        onChange={(e) => setFormData({ ...formData, district: e.target.value })}
-                        placeholder="Örn: Kadıköy, Beşiktaş, Üsküdar"
-                        className="border-green-200 focus:border-green-500 focus:ring-green-500"
-                      />
+                        onValueChange={(value) => setFormData({ ...formData, district: value })}
+                        disabled={formData.city !== "Antalya"}
+                      >
+                        <SelectTrigger className="border-green-200">
+                          <SelectValue placeholder="İlçe seçin" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ANTALYA_DISTRICTS.map((district) => (
+                            <SelectItem key={district} value={district}>{district}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
 
@@ -269,23 +308,16 @@ export default function CreateTeamPage() {
 
                   {/* Max Members */}
                   <div className="space-y-2">
-                    <Label htmlFor="maxMembers" className="text-green-800">
-                      Maksimum Üye Sayısı
-                    </Label>
-                    <Select
+                    <Label htmlFor="maxMembers" className="text-green-800">Maksimum Üye Sayısı *</Label>
+                    <Input
+                      id="maxMembers"
+                      type="number"
+                      min={6}
                       value={formData.maxMembers}
-                      onValueChange={(value) => setFormData({ ...formData, maxMembers: value })}
-                    >
-                      <SelectTrigger className="border-green-200 focus:border-green-500 focus:ring-green-500">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="7">7 Kişi (Halı Saha - Küçük Takım)</SelectItem>
-                        <SelectItem value="11">11 Kişi (Futbol - Standart)</SelectItem>
-                        <SelectItem value="15">15 Kişi (Geniş Kadro)</SelectItem>
-                        <SelectItem value="20">20 Kişi (Büyük Takım)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      onChange={e => setFormData({ ...formData, maxMembers: e.target.value })}
+                      className="border-green-200 focus:border-green-500 focus:ring-green-500"
+                      required
+                    />
                     <p className="text-sm text-green-600">Yedek oyuncular dahil toplam üye sayısı</p>
                   </div>
 

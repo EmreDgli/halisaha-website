@@ -182,46 +182,41 @@ export async function logoutUser() {
   }
 }
 
-// Get current user with better session handling
+// Kullanıcıya benzersiz #xxxx formatında tag ata
+export async function assignUserTag(userId: string) {
+  // 4 haneli random sayı üret
+  let tag;
+  let exists = true;
+  while (exists) {
+    tag = "#" + Math.floor(1000 + Math.random() * 9000);
+    // Benzersiz mi kontrol et
+    const { data } = await supabase.from("users").select("id").eq("tag", tag).single();
+    exists = !!data;
+  }
+  await supabase.from("users").update({ tag }).eq("id", userId);
+  return tag;
+}
+
+// getCurrentUser fonksiyonunda tag yoksa ata
 export async function getCurrentUser() {
-  try {
-    // First check if we have a session
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession()
-    console.log("[getCurrentUser] session:", session)
-    if (sessionError) {
-      console.error("Session error:", sessionError)
-      throw sessionError
-    }
-    if (!session) {
-      console.log("No active session found")
-      return { data: null, error: null }
-    }
-    // Get user from session
-    const user = session.user
-    if (!user) {
-      console.log("No user in session")
-      return { data: null, error: null }
-    }
-    // Get user profile
-    const { data: profile, error: profileError } = await supabase
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null };
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", user.id)
+    .single();
+  if (!data?.tag) {
+    await assignUserTag(user.id);
+    // Tag atandıktan sonra tekrar çek
+    const { data: newData } = await supabase
       .from("users")
       .select("*")
       .eq("id", user.id)
-      .maybeSingle()
-    if (profileError) {
-      console.error("Profile error:", profileError)
-      throw profileError
-    }
-    console.log("[getCurrentUser] user:", user)
-    console.log("[getCurrentUser] profile:", profile)
-    return { data: { user, profile }, error: null }
-  } catch (error) {
-    console.error("Get current user error:", error)
-    return { data: null, error }
+      .single();
+    return { data: newData, error };
   }
+  return { data, error };
 }
 
 // Check authentication status

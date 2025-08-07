@@ -13,6 +13,9 @@ export async function createField(fieldData: {
   capacity?: number
   amenities?: string[]
   images?: string[]
+  field_count?: number
+  city?: string
+  district?: string
 }) {
   try {
     const {
@@ -28,9 +31,12 @@ export async function createField(fieldData: {
         capacity: fieldData.capacity || 22,
         amenities: fieldData.amenities || [],
         images: fieldData.images || [],
+        field_count: fieldData.field_count,
       })
       .select()
       .single()
+
+    console.log('Supabase insert result:', { data, error });
 
     if (error) throw error
 
@@ -165,6 +171,9 @@ export async function updateField(
     capacity: number
     amenities: string[]
     images: string[]
+    city?: string
+    district?: string
+    field_count?: number
   }>,
 ) {
   try {

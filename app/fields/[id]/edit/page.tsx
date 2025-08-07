@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { MapPin, Save } from "lucide-react"
 import { getFieldDetails, updateField } from "@/lib/api/fields"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 export default function EditFieldPage() {
   const router = useRouter()
@@ -18,6 +19,9 @@ export default function EditFieldPage() {
     address: "",
     hourly_rate: "",
     description: "",
+    city: "",
+    district: "",
+    field_count: "1",
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -35,6 +39,9 @@ export default function EditFieldPage() {
           address: data.address || "",
           hourly_rate: data.hourly_rate?.toString() || "",
           description: data.description || "",
+          city: data.city || "",
+          district: data.district || "",
+          field_count: data.field_count?.toString() || "1",
         })
       } catch (e) {
         setError("Saha bulunamadı.")
@@ -59,6 +66,9 @@ export default function EditFieldPage() {
         address: form.address,
         hourly_rate: Number(form.hourly_rate),
         description: form.description,
+        city: form.city,
+        district: form.district,
+        field_count: Number(form.field_count),
       })
       router.push("/dashboard/owner")
     } catch (err: any) {
@@ -71,6 +81,15 @@ export default function EditFieldPage() {
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-green-700">Yükleniyor...</div>
   }
+
+  // Türkiye şehir/ilçe örnek verisi
+  const cityDistricts: { [key: string]: string[] } = {
+    "Antalya": [
+      "Aksu", "Alanya", "Demre", "Döşemealtı", "Elmalı", "Finike", "Gazipaşa", "Gündoğmuş", "İbradı", "Kaş", "Kemer", "Kepez", "Konyaaltı", "Korkuteli", "Kumluca", "Manavgat", "Muratpaşa", "Serik"
+    ]
+  };
+  const cityOptions = Object.keys(cityDistricts);
+  const districtOptions = form.city && cityDistricts[form.city] ? cityDistricts[form.city] : [];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-white flex items-center justify-center py-12 px-4">
@@ -87,9 +106,41 @@ export default function EditFieldPage() {
               <Label htmlFor="name" className="text-green-800">Saha Adı *</Label>
               <Input id="name" name="name" value={form.name} onChange={handleChange} required className="border-green-200 focus:border-green-500 focus:ring-green-500" />
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="city" className="text-green-800">Şehir *</Label>
+                <Select value={form.city} onValueChange={value => setForm({ ...form, city: value, district: "" })}>
+                  <SelectTrigger className="border-green-200 focus:border-green-500 focus:ring-green-500 appearance-none bg-none">
+                    <SelectValue placeholder="Şehir seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cityOptions.map(city => (
+                      <SelectItem key={city} value={city}>{city}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="district" className="text-green-800">İlçe *</Label>
+                <Select value={form.district} onValueChange={value => setForm({ ...form, district: value })} disabled={!form.city}>
+                  <SelectTrigger className="border-green-200 focus:border-green-500 focus:ring-green-500 appearance-none bg-none">
+                    <SelectValue placeholder="İlçe seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {districtOptions.map((district: string) => (
+                      <SelectItem key={district} value={district}>{district}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="address" className="text-green-800">Adres *</Label>
               <Input id="address" name="address" value={form.address} onChange={handleChange} required className="border-green-200 focus:border-green-500 focus:ring-green-500" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="field_count" className="text-green-800">Saha Sayısı *</Label>
+              <Input id="field_count" name="field_count" type="number" min="1" step="1" value={form.field_count} onChange={handleChange} required className="border-green-200 focus:border-green-500 focus:ring-green-500" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="hourly_rate" className="text-green-800">Saatlik Ücret (₺) *</Label>

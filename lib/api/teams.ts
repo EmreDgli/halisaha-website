@@ -141,49 +141,70 @@ export async function requestToJoinTeam(teamId: string, message?: string) {
   }
 }
 
-// Approve/reject team join request
+// Takıma gelen katılma isteklerini getir
+export async function getTeamJoinRequests(teamId: string) {
+  return await supabase
+    .from('team_join_requests')
+    .select('*, user:users(full_name, avatar_url)')
+    .eq('team_id', teamId)
+    .eq('status', 'pending');
+}
+
+// Kullanıcının yönettiği takımlara gelen tüm pending katılma istekleri
+export async function getJoinRequestsForManager() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("User not authenticated");
+
+  // Önce kullanıcının manager olduğu takımları çek
+  const { data: teams } = await supabase
+    .from('teams')
+    .select('id')
+    .eq('manager_id', user.id);
+
+  const teamIds = teams?.map((t: any) => t.id) || [];
+  if (teamIds.length === 0) return { data: [], error: null };
+
+  // Sonra bu takımlara gelen pending join requestleri çek
+  const { data, error } = await supabase
+    .from('team_join_requests')
+    .select('*, user:users(full_name, avatar_url), team:teams(name)')
+    .in('team_id', teamIds)
+    .eq('status', 'pending');
+
+  return { data, error };
+}
+
+// Katılma isteğini onayla veya reddet
 export async function handleTeamJoinRequest(requestId: string, approve: boolean) {
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) throw new Error("User not authenticated")
+  const status = approve ? 'approved' : 'rejected';
+  // Önce join requesti bul
+  const { data: joinRequest, error: fetchError } = await supabase
+    .from('team_join_requests')
+    .select('*')
+    .eq('id', requestId)
+    .single();
+  if (fetchError || !joinRequest) return { error: fetchError || 'Join request not found' };
 
-    const status = approve ? "approved" : "rejected"
-
-    const { data, error } = await supabase
-      .from("team_join_requests")
-      .update({ status })
-      .eq("id", requestId)
-      .select(`
-        *,
-        team:teams(name),
-        user:users(full_name)
-      `)
-      .single()
-
-    if (error) throw error
-
-    // If approved, add user to team
+  // Onaylanırsa üyeler tablosuna ekle
     if (approve) {
-      await supabase.from("team_members").insert({
-        team_id: data.team_id,
-        user_id: data.user_id,
-      })
-    }
-
-    // Notify the requester
-    await supabase.rpc("create_notification", {
-      p_user_id: data.user_id,
-      p_title: approve ? "Takım Katılım İsteği Onaylandı" : "Takım Katılım İsteği Reddedildi",
-      p_message: `${data.team.name} takımına katılım isteğiniz ${approve ? "onaylandı" : "reddedildi"}`,
-      p_type: "team_join_response",
-    })
-
-    return { data, error: null }
-  } catch (error) {
-    return { data: null, error }
+    await supabase.from('team_members').insert({
+      team_id: joinRequest.team_id,
+      user_id: joinRequest.user_id,
+    });
   }
+  // Status'u güncelle
+  return await supabase
+    .from('team_join_requests')
+    .update({ status })
+    .eq('id', requestId);
+}
+
+// Takımı ve üyeliklerini sil
+export async function deleteTeam(teamId: string) {
+  // Önce üyelikleri sil
+  await supabase.from('team_members').delete().eq('team_id', teamId);
+  // Sonra takımı sil
+  return await supabase.from('teams').delete().eq('id', teamId);
 }
 
 // Get team details

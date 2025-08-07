@@ -354,7 +354,7 @@ export default function HomePage() {
           </div>
 
           <div className="border-t border-green-700 mt-8 pt-8 text-center text-green-200">
-            <p>&copy; 2024 HalıSaha Pro. Tüm hakları saklıdır.</p>
+            <p>&copy; 2025 HalıSaha Pro. Tüm hakları saklıdır.</p>
           </div>
         </div>
       </footer>

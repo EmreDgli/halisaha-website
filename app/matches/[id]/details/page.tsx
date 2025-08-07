@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, use } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -21,6 +21,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { getMatchDetails } from '@/lib/api/matches';
 
 interface Match {
   id: string
@@ -35,10 +36,15 @@ interface Match {
   matchFee: string
   notes?: string
   createdBy: string
+  participants: Player[]
+  pendingRequests: Player[]
+  maxPlayers?: number; // Added for max players
+  max_members?: number; // Added for max members
+  max_players?: number; // Added for max players
 }
 
 interface Player {
-  id: number
+  id: string
   name: string
   team: string
   position: string
@@ -46,69 +52,38 @@ interface Player {
   joinedAt: string
 }
 
-export default function MatchDetailsPage({ params }: { params: any }) {
-  const { id } = use(params) as any
-  const [match, setMatch] = useState<Match | null>(null)
-  const [players, setPlayers] = useState<Player[]>([])
-  const router = useRouter()
+export default function MatchDetailsPage({ params }: { params: { id: string } }) {
+  const { id } = params;
+  const [match, setMatch] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
   useEffect(() => {
-    // Load match details from localStorage
-    const storedMatches = JSON.parse(localStorage.getItem("userMatches") || "[]")
-    console.log("[DEBUG] storedMatches:", storedMatches)
-    console.log("[DEBUG] params.id:", id)
-    const foundMatch = storedMatches.find((m: Match) => m.id === String(id))
+    const fetchMatch = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const { data, error } = await getMatchDetails(id);
+        if (error || !data) {
+          setError('Maç bulunamadı veya erişim hatası oluştu.');
+        } else {
+          setMatch(data);
+        }
+      } catch (err) {
+        setError('Maç bilgileri alınırken bir hata oluştu.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchMatch();
+    // Kullanıcıyı localStorage veya auth'dan çek (gerekirse Supabase'den de alınabilir)
+    const userRaw = localStorage.getItem("authUser");
+    if (userRaw) setCurrentUser(JSON.parse(userRaw));
+  }, [id]);
 
-    if (foundMatch) {
-      setMatch(foundMatch)
-
-      // Mock players data
-      setPlayers([
-        {
-          id: 1,
-          name: "Ahmet Yılmaz",
-          team: foundMatch.homeTeam,
-          position: "Orta Saha",
-          paymentStatus: "paid",
-          joinedAt: "2 gün önce",
-        },
-        {
-          id: 2,
-          name: "Mehmet Kaya",
-          team: foundMatch.homeTeam,
-          position: "Forvet",
-          paymentStatus: "paid",
-          joinedAt: "2 gün önce",
-        },
-        {
-          id: 3,
-          name: "Ali Demir",
-          team: foundMatch.homeTeam,
-          position: "Defans",
-          paymentStatus: "pending",
-          joinedAt: "1 gün önce",
-        },
-        {
-          id: 4,
-          name: "Can Özkan",
-          team: foundMatch.awayTeam,
-          position: "Kaleci",
-          paymentStatus: "paid",
-          joinedAt: "1 gün önce",
-        },
-        {
-          id: 5,
-          name: "Emre Yıldız",
-          team: foundMatch.awayTeam,
-          position: "Orta Saha",
-          paymentStatus: "pending",
-          joinedAt: "6 saat önce",
-        },
-      ])
-    }
-  }, [id])
-
-  if (!match) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100 flex items-center justify-center">
         <div className="text-center">
@@ -119,12 +94,115 @@ export default function MatchDetailsPage({ params }: { params: any }) {
     )
   }
 
-  const homeTeamPlayers = players.filter((p) => p.team === match.homeTeam)
-  const awayTeamPlayers = players.filter((p) => p.team === match.awayTeam)
-  const paidPlayers = players.filter((p) => p.paymentStatus === "paid")
-  const pendingPayments = players.filter((p) => p.paymentStatus === "pending")
-  const currentUserPaymentStatus = players.find((p) => p.name === "Ahmet Yılmaz")?.paymentStatus
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+        </div>
+      </div>
+    )
+  }
 
+  if (!match) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-green-600 mb-4">Maç bilgisi bulunamadı.</p>
+        </div>
+      </div>
+    )
+  }
+
+  const homeTeamPlayers = match.participants.filter((p: any) => p.team === match.homeTeam)
+  const awayTeamPlayers = match.participants.filter((p: any) => p.team === match.awayTeam)
+  const paidPlayers = match.participants.filter((p: any) => p.paymentStatus === "paid")
+  const pendingPayments = match.participants.filter((p: any) => p.paymentStatus === "pending")
+  const currentUserPaymentStatus = match.participants.find((p: any) => p.name === "Ahmet Yılmaz")?.paymentStatus
+
+  // Katılım isteği gönder
+  const handleJoinRequest = () => {
+    if (!match || !currentUser) return
+    // Zaten pending veya participant ise tekrar ekleme
+    if (
+      match.pendingRequests.some((p: any) => p.id === currentUser.id) ||
+      match.participants.some((p: any) => p.id === currentUser.id)
+    ) return
+    const updatedMatch: Match = {
+      ...match,
+      pendingRequests: [...match.pendingRequests, {
+        id: currentUser.id,
+        name: currentUser.profile?.full_name || "Kullanıcı",
+        team: match.homeTeam,
+        position: "Oyuncu",
+        paymentStatus: "pending",
+        joinedAt: new Date().toISOString(),
+      }],
+    }
+    updateMatchInStorage(updatedMatch)
+    setMatch(updatedMatch)
+  }
+  // Takım sahibi onayla/reddet
+  const handleApprove = (playerId: string) => {
+    if (!match) return
+    const player = match.pendingRequests.find((p: any) => p.id === playerId)
+    if (!player) return
+    const updatedMatch: Match = {
+      ...match,
+      participants: [...match.participants, { ...player, paymentStatus: "pending" }],
+      pendingRequests: match.pendingRequests.filter((p: any) => p.id !== playerId),
+    }
+    updateMatchInStorage(updatedMatch)
+    setMatch(updatedMatch)
+  }
+  const handleReject = (playerId: string) => {
+    if (!match) return
+    const updatedMatch = {
+      ...match,
+      pendingRequests: match.pendingRequests.filter((p: any) => p.id !== playerId),
+    }
+    updateMatchInStorage(updatedMatch)
+    setMatch(updatedMatch)
+  }
+  // localStorage güncelle
+  function updateMatchInStorage(updatedMatch: Match) {
+    const userMatches = JSON.parse(localStorage.getItem("userMatches") || "[]")
+    const idx = userMatches.findIndex((m: Match) => String(m.id) === String(updatedMatch.id))
+    if (idx !== -1) {
+      userMatches[idx] = updatedMatch
+      localStorage.setItem("userMatches", JSON.stringify(userMatches))
+    }
+  }
+
+  // Takım üyelerini çek
+  function getTeamMembers(teamName: string) {
+    const userTeamsRaw = localStorage.getItem("userTeams")
+    const userTeams = JSON.parse(!userTeamsRaw || userTeamsRaw === 'undefined' ? '[]' : userTeamsRaw)
+    const team = userTeams.find((t: any) => t.name === teamName)
+    return team && Array.isArray(team.members) ? team.members : []
+  }
+
+  const isOwner = currentUser && match && match.createdBy === currentUser.id
+  const homeTeamMembers = match ? getTeamMembers(match.homeTeam) : []
+  const awayTeamMembers = match ? getTeamMembers(match.awayTeam) : []
+
+  // Katılımcı ve bekleyenler sadece takımda olanlardan oluşsun
+  const filteredParticipants = (match?.participants || []).filter((p: any) =>
+    homeTeamMembers.some((m: any) => m.id === p.id) ||
+    awayTeamMembers.some((m: any) => m.id === p.id)
+  )
+  const filteredPendingRequests = (match?.pendingRequests || []).filter((p: any) =>
+    homeTeamMembers.some((m: any) => m.id === p.id) ||
+    awayTeamMembers.some((m: any) => m.id === p.id)
+  )
+  // Katılım isteği gönderen kişi gerçekten takımda mı?
+  const canJoin = !isOwner &&
+    !filteredParticipants.some((p: any) => p.id === currentUser?.id) &&
+    !filteredPendingRequests.some((p: any) => p.id === currentUser?.id) &&
+    (homeTeamMembers.some((m: any) => m.id === currentUser?.id) ||
+     awayTeamMembers.some((m: any) => m.id === currentUser?.id))
+
+  // Katılımcı listesi ve bekleyenler
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100">
       {/* Header */}
@@ -161,7 +239,7 @@ export default function MatchDetailsPage({ params }: { params: any }) {
                     </span>
                     <span className="flex items-center">
                       <MapPin className="w-4 h-4 mr-1" />
-                      {match.field}
+                      {match.field?.name}
                     </span>
                   </div>
                 </div>
@@ -234,14 +312,14 @@ export default function MatchDetailsPage({ params }: { params: any }) {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {homeTeamPlayers.map((player) => (
+                  {homeTeamPlayers.map((player: Player) => (
                     <div key={player.id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
                       <div className="flex items-center space-x-3">
                         <Avatar className="w-8 h-8">
                           <AvatarFallback className="bg-green-200 text-green-700 text-xs">
                             {player.name
                               .split(" ")
-                              .map((n) => n[0])
+                              .map((n: string) => n[0])
                               .join("")}
                           </AvatarFallback>
                         </Avatar>
@@ -289,14 +367,14 @@ export default function MatchDetailsPage({ params }: { params: any }) {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {awayTeamPlayers.map((player) => (
+                    {awayTeamPlayers.map((player: Player) => (
                       <div key={player.id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
                         <div className="flex items-center space-x-3">
                           <Avatar className="w-8 h-8">
                             <AvatarFallback className="bg-green-200 text-green-700 text-xs">
                               {player.name
                                 .split(" ")
-                                .map((n) => n[0])
+                                .map((n: string) => n[0])
                                 .join("")}
                             </AvatarFallback>
                           </Avatar>
@@ -434,16 +512,98 @@ export default function MatchDetailsPage({ params }: { params: any }) {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-green-600">Toplam Oyuncu:</span>
-                    <span className="text-green-800">{players.length}</span>
+                    <span className="text-green-800">{match.participants.length}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-green-600">Durum:</span>
                     <span className="text-green-800">{match.status === "confirmed" ? "Onaylandı" : "Bekliyor"}</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-green-600">Maks Üye:</span>
+                    <span className="text-green-800">{match.maxPlayers || match.max_members || match.max_players || '-'}</span>
+                  </div>
                 </CardContent>
               </Card>
             </div>
           </div>
+
+          {/* Katılımcılar */}
+          <Card className="border-green-200 mt-8">
+            <CardHeader>
+              <CardTitle className="text-lg text-green-800 flex items-center justify-between">
+                <span className="flex items-center">
+                  <Users className="w-5 h-5 mr-2" />
+                  Katılımcılar
+                </span>
+                <Badge className="bg-green-100 text-green-700">{filteredParticipants.length} kişi</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {filteredParticipants.map((player: Player) => (
+                <div key={player.id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    <Avatar className="w-8 h-8">
+                      <AvatarFallback className="bg-green-200 text-green-700 text-xs">
+                        {player.name.split(" ").map((n: string) => n[0]).join("")}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="font-medium text-green-800">{player.name}</p>
+                      <p className="text-sm text-green-600">{player.position}</p>
+                    </div>
+                  </div>
+                  <Badge className="bg-green-600 text-white">Katıldı</Badge>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+          {isOwner && filteredPendingRequests.length > 0 && (
+            <Card className="border-green-200 mt-4">
+              <CardHeader>
+                <CardTitle className="text-lg text-green-800">Onay Bekleyenler</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {filteredPendingRequests.map((player: Player) => (
+                  <div key={player.id} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <Avatar className="w-8 h-8">
+                        <AvatarFallback className="bg-orange-200 text-orange-700 text-xs">
+                          {player.name.split(" ").map((n: string) => n[0]).join("")}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-medium text-orange-800">{player.name}</p>
+                        <p className="text-sm text-orange-600">{player.position}</p>
+                      </div>
+                    </div>
+                    <div className="flex space-x-2">
+                      <Button size="sm" className="bg-green-600 text-white" onClick={() => handleApprove(player.id)}>
+                        Onayla
+                      </Button>
+                      <Button size="sm" className="bg-red-600 text-white" onClick={() => handleReject(player.id)}>
+                        Reddet
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+          {canJoin && (
+            <Button className="mt-4 bg-green-600 text-white" onClick={handleJoinRequest}>
+              Katılmak İstiyorum
+            </Button>
+          )}
+          {!isOwner && (match.pendingRequests || []).some((p: any) => p.id === currentUser?.id) && (
+            <Alert className="mt-4 border-orange-200 bg-orange-50">
+              <AlertDescription className="text-orange-700">Katılım isteğiniz onay bekliyor.</AlertDescription>
+            </Alert>
+          )}
+          {!isOwner && (match.participants || []).some((p: any) => p.id === currentUser?.id) && (
+            <Alert className="mt-4 border-green-200 bg-green-50">
+              <AlertDescription className="text-green-700">Maça katılımınız onaylandı!</AlertDescription>
+            </Alert>
+          )}
         </div>
       </div>
     </div>

@@ -15,6 +15,7 @@ import {
   Bell,
   CheckCircle,
   X,
+  XCircle,
 } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -28,6 +29,7 @@ import { getUserTeams } from "@/lib/api/teams"
 import { getUserMatches } from "@/lib/api/matches"
 import { useAuthContext } from "@/components/AuthProvider"
 import React from "react"
+import { getJoinRequestsForManager, handleTeamJoinRequest } from "@/lib/api/teams";
 
 interface Team {
   id: string
@@ -68,29 +70,70 @@ interface JoinRequest {
   status: "pending" | "accepted" | "rejected"
 }
 
+function JoinRequestsPanel() {
+  const [requests, setRequests] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchRequests = async () => {
+      setLoading(true);
+      const { data } = await getJoinRequestsForManager();
+      setRequests(data || []);
+      setLoading(false);
+    };
+    fetchRequests();
+  }, []);
+
+  const handleAction = async (id: string, approve: boolean) => {
+    await handleTeamJoinRequest(id, approve);
+    setRequests((prev) => prev.filter((req) => req.id !== id));
+  };
+
+  if (loading) return <div>Yükleniyor...</div>;
+
+  return (
+    <div className="p-6">
+      <h2 className="text-2xl font-bold text-green-800 mb-4 flex items-center">
+        <span className="mr-2">Katılma İstekleri</span>
+        <span className="text-green-600">({requests.length})</span>
+      </h2>
+      {requests.length === 0 ? (
+        <div className="text-green-600">Bekleyen katılma isteği yok.</div>
+      ) : (
+        requests.map((req) => (
+          <div key={req.id} className="bg-green-50 rounded-lg p-4 mb-4 flex justify-between items-center">
+            <div>
+              <div className="font-semibold text-green-800">{req.user?.full_name}</div>
+              <div className="text-green-700">{req.team?.name} takımına katılmak istiyor</div>
+              <div className="text-green-700">{req.message}</div>
+              <div className="text-xs text-green-500 mt-1">{/* Burada başvuru zamanı gösterilebilir */}</div>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="border-red-200 text-red-600"
+                onClick={() => handleAction(req.id, false)}
+              >
+                <XCircle className="w-4 h-4 mr-1" /> Reddet
+              </Button>
+              <Button
+                className="bg-green-600 text-white"
+                onClick={() => handleAction(req.id, true)}
+              >
+                <CheckCircle className="w-4 h-4 mr-1" /> Kabul Et
+              </Button>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 export default function PlayerDashboard() {
   const { user, loading: authLoading, error: authError, isAuthenticated } = useAuthContext()
   const [myTeams, setMyTeams] = useState<Team[]>([])
   const [upcomingMatches, setUpcomingMatches] = useState<Match[]>([])
-  const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([
-    {
-      id: 1,
-      teamName: "Yıldızlar FC",
-      playerName: "Mehmet Özkan",
-      message: "Takımınıza katılmak istiyorum. Orta saha pozisyonunda oynuyorum.",
-      time: "2 saat önce",
-      status: "pending",
-    },
-    {
-      id: 2,
-      teamName: "Şampiyonlar",
-      playerName: "Ali Demir",
-      message: "Merhaba, takımınızda forvet pozisyonunda oynamak istiyorum.",
-      time: "5 saat önce",
-      status: "pending",
-    },
-  ])
-
   const [showNotifications, setShowNotifications] = useState(false)
   const [dataLoading, setDataLoading] = useState(false)
 
@@ -132,7 +175,14 @@ export default function PlayerDashboard() {
         if (teamsError) {
           console.error("Error loading teams:", teamsError)
         } else if (teamsData) {
-          setMyTeams(teamsData)
+          const processedTeams = teamsData.map((team: any) => ({
+            ...team,
+            id: team.id || team.team_id || team.slug || team.name || crypto.randomUUID(),
+            name: team.name || team.team_name, // <-- Burası önemli!
+            owner_id: team.owner_id || team.manager_id
+          }));
+          setMyTeams(processedTeams);
+          localStorage.setItem("userTeams", JSON.stringify(processedTeams));
         }
 
         // Load user matches
@@ -152,14 +202,6 @@ export default function PlayerDashboard() {
     loadUserData()
   }, [isAuthenticated, user])
 
-  const handleJoinRequest = (requestId: number, action: "accept" | "reject") => {
-    setJoinRequests((prev) =>
-      prev.map((request) =>
-        request.id === requestId ? { ...request, status: action === "accept" ? "accepted" : "rejected" } : request,
-      ),
-    )
-  }
-
   const handleLogout = async () => {
     try {
       await logoutUser()
@@ -169,11 +211,9 @@ export default function PlayerDashboard() {
     }
   }
 
-  const pendingRequests = joinRequests.filter((req) => req.status === "pending")
-
-  // myTeams dizisini ikiye ayır
-  const ownedTeams = myTeams.filter(team => team.owner_id === user.id)
-  const memberTeams = myTeams.filter(team => team.owner_id !== user.id)
+  // myTeams dizisini ikiye ayır (tip güvenli karşılaştırma)
+  const ownedTeams = myTeams.filter(team => String(team.owner_id) === String(user.id));
+  const memberTeams = myTeams.filter(team => String(team.owner_id) !== String(user.id));
 
   // Show loading state
   if (authLoading) {
@@ -242,11 +282,11 @@ export default function PlayerDashboard() {
                 onClick={() => setShowNotifications(!showNotifications)}
               >
                 <Bell className="h-4 w-4" />
-                {pendingRequests.length > 0 && (
+                {/* pendingRequests.length > 0 && (
                   <Badge className="absolute -top-2 -right-2 bg-red-500 text-white text-xs px-1 min-w-[20px] h-5">
                     {pendingRequests.length}
                   </Badge>
-                )}
+                ) */}
               </Button>
               <Button
                 variant="ghost"
@@ -284,7 +324,11 @@ export default function PlayerDashboard() {
             </Avatar>
             <div className="flex-1">
               <h2 className="text-2xl font-bold text-green-800">
-                Hoş geldin, {user.profile?.full_name || "Kullanıcı"}!
+                Hoş geldin, {user.profile?.full_name || user.full_name || "Kullanıcı"}
+                {user.profile?.tag && (
+                  <span className="ml-2 inline-block bg-green-100 text-green-700 text-sm px-2 py-0.5 rounded align-middle">{user.profile.tag}</span>
+                )}
+                !
               </h2>
               <p className="text-green-600">{user.profile?.email}</p>
               <div className="flex space-x-4 mt-2">
@@ -302,23 +346,6 @@ export default function PlayerDashboard() {
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600 mr-2"></div>
               <span className="text-green-700">Veriler yükleniyor...</span>
             </div>
-          </Alert>
-        )}
-
-        {/* Join Requests Alert */}
-        {pendingRequests.length > 0 && (
-          <Alert className="mb-8 border-green-200 bg-green-50">
-            <Bell className="h-4 w-4 text-green-600" />
-            <AlertDescription className="text-green-700">
-              <div className="flex items-center justify-between">
-                <span>
-                  <strong>{pendingRequests.length}</strong> yeni katılma isteği var!
-                </span>
-                <Button size="sm" variant="outline" className="border-green-300 text-green-700 hover:bg-green-100">
-                  İstekleri Görüntüle
-                </Button>
-              </div>
-            </AlertDescription>
           </Alert>
         )}
 
@@ -379,15 +406,19 @@ export default function PlayerDashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <h3 className="font-semibold mt-2 mb-1 text-green-800">Oluşturduğum Takımlar</h3>
-              {ownedTeams.length > 0 ? (
-                ownedTeams.map((team, index) => (
+              {myTeams.length > 0 ? (
+                myTeams.map((team, index) => (
                   <div
                     key={team.id || team.name || index}
                     className="flex items-center justify-between p-4 bg-green-50 rounded-lg border border-green-200"
                   >
                     <div>
-                      <h4 className="font-medium text-green-800">{team.name}</h4>
+                      <h4 className="font-medium text-green-800 text-lg mb-1 flex items-center">
+                        {team.name}
+                        {String(team.owner_id) === String(user.id) && (
+                          <Badge className="ml-2 bg-green-700 text-white">Takım Sahibi</Badge>
+                        )}
+                      </h4>
                       <p className="text-sm text-green-600">
                         {team.role || "Üye"} • {team.member_count || 1} üye
                       </p>
@@ -410,40 +441,7 @@ export default function PlayerDashboard() {
                   </div>
                 ))
               ) : (
-                <div className="text-green-600 text-sm">Henüz oluşturduğunuz takım yok.</div>
-              )}
-              <h3 className="font-semibold mt-6 mb-1 text-green-800">Katıldığım Takımlar</h3>
-              {memberTeams.length > 0 ? (
-                memberTeams.map((team, index) => (
-                  <div
-                    key={team.id || team.name || index}
-                    className="flex items-center justify-between p-4 bg-green-50 rounded-lg border border-green-200"
-                  >
-                    <div>
-                      <h4 className="font-medium text-green-800">{team.name}</h4>
-                      <p className="text-sm text-green-600">
-                        {team.role || "Üye"} • {team.member_count || 1} üye
-                      </p>
-                      <p className="text-sm text-green-500">
-                        {team.city} {team.district && `• ${team.district}`}
-                      </p>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Badge className="bg-green-600 text-white">{team.role || "Üye"}</Badge>
-                      <Link href={`/teams/${team.id}/manage`}>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="border-green-300 text-green-700 hover:bg-green-100"
-                        >
-                          Yönet
-                        </Button>
-                      </Link>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-green-600 text-sm">Henüz katıldığınız takım yok.</div>
+                <div className="text-green-600 text-sm">Henüz bir takıma katılmadınız veya oluşturmadınız.</div>
               )}
             </CardContent>
           </Card>
@@ -508,52 +506,6 @@ export default function PlayerDashboard() {
           </Card>
         </div>
 
-        {/* Join Requests Section */}
-        {pendingRequests.length > 0 && (
-          <Card className="mt-8 border-green-200">
-            <CardHeader>
-              <CardTitle className="flex items-center text-green-800">
-                <Bell className="h-5 w-5 mr-2" />
-                Katılma İstekleri ({pendingRequests.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {pendingRequests.map((request) => (
-                <div
-                  key={request.id}
-                  className="flex items-center justify-between p-4 bg-green-50 rounded-lg border border-green-200"
-                >
-                  <div className="flex-1">
-                    <h4 className="font-medium text-green-800">{request.playerName}</h4>
-                    <p className="text-sm text-green-600">{request.teamName} takımına katılmak istiyor</p>
-                    <p className="text-sm text-green-500 mt-1">{request.message}</p>
-                    <p className="text-xs text-green-400 mt-2">{request.time}</p>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleJoinRequest(request.id, "reject")}
-                      className="text-red-600 border-red-200 hover:bg-red-50"
-                    >
-                      <X className="w-4 h-4 mr-1" />
-                      Reddet
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => handleJoinRequest(request.id, "accept")}
-                      className="bg-green-600 hover:bg-green-700 text-white"
-                    >
-                      <CheckCircle className="w-4 h-4 mr-1" />
-                      Kabul Et
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
-
         {/* Recent Videos */}
         <Card className="mt-8 border-green-200">
           <CardHeader>
@@ -586,6 +538,9 @@ export default function PlayerDashboard() {
             </Link>
           </CardContent>
         </Card>
+
+        {/* Dynamic Join Requests Panel */}
+        <JoinRequestsPanel />
       </div>
     </div>
   )

@@ -16,6 +16,8 @@ import { createMatch } from "@/lib/api/matches"
 import { getUserTeams } from "@/lib/api/teams"
 import { getFields } from "@/lib/api/fields"
 import { getCurrentUser } from "@/lib/api/auth"
+import { useAuthContext } from "@/components/AuthProvider"
+import FieldAvailability  from "@/components/FieldAvailability"
 
 interface Team {
   id: string
@@ -29,17 +31,16 @@ interface Field {
   address: string
   hourly_rate: number
   city?: string
+  district?: string // <-- ilçe desteği
 }
 
 export default function CreateMatchPage() {
   const [formData, setFormData] = useState({
     title: "",
     myTeam: "",
-    opponentTeam: "",
     date: "",
     time: "",
     field: "",
-    duration: "90",
     matchType: "friendly",
     entryFee: "",
     notes: "",
@@ -52,6 +53,27 @@ export default function CreateMatchPage() {
   const [loadingTeams, setLoadingTeams] = useState(true)
   const [loadingFields, setLoadingFields] = useState(true)
   const router = useRouter()
+  const { user } = useAuthContext()
+  const [selectedTime, setSelectedTime] = useState("");
+  const [selectedDuration, setSelectedDuration] = useState(1); // 1 veya 2
+
+  // State'ler:
+  const [selectedCity, setSelectedCity] = useState("");
+  const [selectedDistrict, setSelectedDistrict] = useState("");
+
+  // Şehir ve ilçe listeleri (örnek, gerçek veriye göre güncellenebilir):
+  // Antalya ve ilçeleri sabit listesi
+  const ANTALYA_DISTRICTS = [
+    "Aksu", "Alanya", "Demre", "Döşemealtı", "Elmalı", "Finike", "Gazipaşa", "Gündoğmuş", "İbradı", "Kaş", "Kemer", "Kepez", "Konyaaltı", "Korkuteli", "Kumluca", "Manavgat", "Muratpaşa", "Serik"
+  ];
+  const cityOptions = ["Antalya"];
+  const districtOptions = selectedCity === "Antalya" ? ANTALYA_DISTRICTS : [];
+
+  // Filtrelenmiş saha listesi:
+  const filteredFields = availableFields.filter(f =>
+    (!selectedCity || (f.city || "") === selectedCity) &&
+    (!selectedDistrict || (f.district || "") === selectedDistrict)
+  );
 
   // Check authentication and load data
   useEffect(() => {
@@ -103,9 +125,9 @@ export default function CreateMatchPage() {
   }, [router])
 
   const selectedField = availableFields.find((f) => f.id === formData.field)
-  const fieldCost = selectedField ? selectedField.hourly_rate * (Number.parseInt(formData.duration) / 60) : 0
-  const platformFee = fieldCost * 0.1
-  const totalCost = fieldCost + platformFee
+  const fieldCost = selectedField ? selectedField.hourly_rate * selectedDuration : 0;
+  const platformFee = fieldCost * 0.1;
+  const totalCost = fieldCost + platformFee;
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {}
@@ -113,11 +135,9 @@ export default function CreateMatchPage() {
     if (!formData.title.trim()) newErrors.title = "Maç başlığı zorunludur"
     if (!formData.myTeam) newErrors.myTeam = "Takım seçimi zorunludur"
     if (!formData.date) newErrors.date = "Tarih seçimi zorunludur"
-    if (!formData.time) newErrors.time = "Saat seçimi zorunludur"
     if (!formData.field) newErrors.field = "Saha seçimi zorunludur"
-    if (!formData.entryFee || Number.parseFloat(formData.entryFee) < 0) {
-      newErrors.entryFee = "Geçerli bir maç ücreti girin (0 veya daha fazla)"
-    }
+    if (!formData.time) newErrors.time = "Saat seçimi zorunludur"
+    // entryFee kontrolü kaldırıldı
 
     // Check if date is in the future
     if (formData.date && formData.time) {
@@ -143,14 +163,15 @@ export default function CreateMatchPage() {
     try {
       const matchDateTime = new Date(formData.date + "T" + formData.time).toISOString()
 
+      const autoEntryFee = selectedField && selectedTime ? Math.ceil((selectedField.hourly_rate * selectedDuration * 1.1) / 2) : 0;
       const { data, error } = await createMatch({
         title: formData.title,
         description: formData.notes,
         field_id: formData.field,
         organizer_team_id: formData.myTeam,
         match_date: matchDateTime,
-        duration_minutes: Number.parseInt(formData.duration),
-        entry_fee: Number.parseFloat(formData.entryFee),
+        duration_minutes: selectedDuration * 60,
+        entry_fee: autoEntryFee,
       })
 
       if (error) {
@@ -163,21 +184,36 @@ export default function CreateMatchPage() {
         // Yeni maçı localStorage'a ekle
         const userMatches = JSON.parse(localStorage.getItem("userMatches") || "[]")
         const newMatchId = String(data.id || crypto.randomUUID())
-        userMatches.push({
+        const homeTeamName = userTeams.find(t => t.id === formData.myTeam)?.name || "Takımım"
+        const newMatch = {
           id: newMatchId,
-          homeTeam: userTeams.find(t => t.id === formData.myTeam)?.name || "Takımım",
-          awayTeam: formData.opponentTeam || "Rakip",
+          homeTeam: homeTeamName,
+          awayTeam: "Rakip", // Opponent team is removed, so it's always "Rakip"
           date: formData.date,
           time: formData.time,
           field: availableFields.find(f => f.id === formData.field)?.name || "Saha",
           status: "pending",
           matchType: formData.matchType,
-          duration: formData.duration,
-          matchFee: formData.entryFee,
+          duration: selectedDuration * 60,
+          matchFee: autoEntryFee,
           notes: formData.notes,
-          createdBy: "me"
-        })
+          createdBy: user?.id || "me",
+          participants: [
+            {
+              id: user?.id || "me",
+              name: user?.profile?.full_name || "Maç Sahibi",
+              team: homeTeamName,
+              position: "Organizatör",
+              paymentStatus: "paid",
+              joinedAt: new Date().toISOString(),
+            }
+          ],
+          pendingRequests: [],
+        }
+        userMatches.push(newMatch)
         localStorage.setItem("userMatches", JSON.stringify(userMatches))
+        console.log("[DEBUG] userMatches after create:", userMatches)
+        console.log("[DEBUG] newMatchId:", newMatchId)
         router.push(`/matches/${newMatchId}/details`)
       }
     } catch (error) {
@@ -291,65 +327,6 @@ export default function CreateMatchPage() {
                     {errors.myTeam && <p className="text-sm text-red-500">{errors.myTeam}</p>}
                   </div>
 
-                  {/* Opponent Team */}
-                  <div className="space-y-2">
-                    <Label htmlFor="opponentTeam" className="text-green-800">
-                      Rakip Takım
-                    </Label>
-                    <Select
-                      value={formData.opponentTeam}
-                      onValueChange={(value) => setFormData({ ...formData, opponentTeam: value })}
-                    >
-                      <SelectTrigger className="border-green-200 focus:border-green-500 focus:ring-green-500">
-                        <SelectValue placeholder="Mevcut takımlardan seç veya sonra davet gönder" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="aranacak">Rakip aranacak</SelectItem>
-                        <SelectItem value="galibiyetspor">Galibiyetspor</SelectItem>
-                        <SelectItem value="dostluk">Dostluk SK</SelectItem>
-                        <SelectItem value="kartallar">Kartallar FC</SelectItem>
-                        <SelectItem value="aslanlar">Aslanlar Spor</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-sm text-green-600">
-                      Rakip bulunamadı mı? Maç ilanı vererek rakip arayabilirsiniz.
-                    </p>
-                  </div>
-
-                  {/* Date and Time */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="date" className="flex items-center text-green-800">
-                        <Calendar className="w-4 h-4 mr-2" />
-                        Tarih *
-                      </Label>
-                      <Input
-                        id="date"
-                        type="date"
-                        value={formData.date}
-                        onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                        className={`border-green-200 focus:border-green-500 focus:ring-green-500 ${errors.date ? "border-red-500" : ""}`}
-                        min={new Date().toISOString().split("T")[0]}
-                        required
-                      />
-                      {errors.date && <p className="text-sm text-red-500">{errors.date}</p>}
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="time" className="flex items-center text-green-800">
-                        <Clock className="w-4 h-4 mr-2" />
-                        Saat *
-                      </Label>
-                      <Input
-                        id="time"
-                        type="time"
-                        value={formData.time}
-                        onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-                        className={`border-green-200 focus:border-green-500 focus:ring-green-500 ${errors.time ? "border-red-500" : ""}`}
-                        required
-                      />
-                      {errors.time && <p className="text-sm text-red-500">{errors.time}</p>}
-                    </div>
-                  </div>
 
                   {/* Field Selection */}
                   <div className="space-y-2">
@@ -363,53 +340,114 @@ export default function CreateMatchPage() {
                         <span className="text-green-600">Sahalar yükleniyor...</span>
                       </div>
                     ) : (
-                      <Select
-                        value={formData.field}
-                        onValueChange={(value) => setFormData({ ...formData, field: value })}
-                      >
-                        <SelectTrigger
-                          className={`border-green-200 focus:border-green-500 focus:ring-green-500 ${errors.field ? "border-red-500" : ""}`}
-                        >
-                          <SelectValue placeholder="Saha seçin" />
+                      <div className="flex flex-col sm:flex-row gap-4 mb-4">
+                        <div className="flex-1">
+                          <Label className="text-green-800">Şehir</Label>
+                          <Select value={selectedCity} onValueChange={value => { setSelectedCity(value); setSelectedDistrict(""); }}>
+                            <SelectTrigger className="border-green-200 focus:border-green-500 focus:ring-green-500">
+                              <SelectValue placeholder="Şehir seçin" />
                         </SelectTrigger>
                         <SelectContent>
-                          {availableFields.map((field) => (
-                            <SelectItem key={field.id} value={field.id}>
-                              <div className="flex justify-between items-center w-full">
-                                <div>
-                                  <div className="font-medium">{field.name}</div>
-                                  <div className="text-sm text-gray-500">{field.address}</div>
+                              {cityOptions.map(city => (
+                                <SelectItem key={city} value={city}>{city}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                                 </div>
-                                <div className="text-green-600 font-semibold">₺{field.hourly_rate}/saat</div>
-                              </div>
-                            </SelectItem>
+                        <div className="flex-1">
+                          <Label className="text-green-800">İlçe</Label>
+                          <Select value={selectedDistrict} onValueChange={setSelectedDistrict} disabled={!selectedCity}>
+                            <SelectTrigger className="border-green-200 focus:border-green-500 focus:ring-green-500">
+                              <SelectValue placeholder="İlçe seçin" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {districtOptions.map(district => (
+                                <SelectItem key={district} value={district}>{district}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                        </div>
+                      </div>
                     )}
                     {errors.field && <p className="text-sm text-red-500">{errors.field}</p>}
                   </div>
 
-                  {/* Match Details */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="duration" className="text-green-800">
-                        Süre (dakika)
-                      </Label>
-                      <Select
-                        value={formData.duration}
-                        onValueChange={(value) => setFormData({ ...formData, duration: value })}
+                  {/* Field Availability (Saat Seçimi) */}
+                  {selectedCity && selectedDistrict && (
+                    <div className="grid md:grid-cols-2 gap-4 mt-2">
+                      {filteredFields.length === 0 ? (
+                        <div className="p-4 border border-green-200 rounded-md bg-green-50 text-green-700 col-span-2">Seçilen filtrelere uygun saha bulunamadı.</div>
+                      ) : (
+                        filteredFields.map(field => (
+                          <div
+                            key={field.id}
+                            className={`border rounded-lg p-4 cursor-pointer transition-all duration-150 relative flex flex-col justify-between ${formData.field === field.id ? 'border-green-600 bg-green-50 shadow-lg' : 'border-green-200 bg-white hover:border-green-400'}`}
+                            onClick={e => {
+                              if ((e.target as HTMLElement).closest('a[data-saha-detay]')) return;
+                              setFormData({ ...formData, field: field.id });
+                            }}
                       >
-                        <SelectTrigger className="border-green-200 focus:border-green-500 focus:ring-green-500">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="60">60 dakika (1 saat)</SelectItem>
-                          <SelectItem value="90">90 dakika (1.5 saat)</SelectItem>
-                          <SelectItem value="120">120 dakika (2 saat)</SelectItem>
-                        </SelectContent>
-                      </Select>
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="font-semibold text-green-800 text-lg">{field.name}</div>
+                                <div className="text-green-700 font-bold text-md">₺{field.hourly_rate}</div>
+                              </div>
+                              <div className="text-sm text-gray-700 mb-1">{field.address}</div>
+                              <div className="text-xs text-gray-500">{field.city} / {field.district}</div>
+                            </div>
+                            <div className="flex justify-end mt-4">
+                              <a
+                                href={`/fields/${field.id}`}
+                                data-saha-detay
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="bg-green-600 hover:bg-green-700 text-white text-xs font-semibold px-4 py-2 rounded shadow transition-colors duration-100"
+                                style={{ minWidth: 120, textAlign: 'center' }}
+                                onClick={e => e.stopPropagation()}
+                              >
+                                Saha Detayı
+                              </a>
+                            </div>
+                          </div>
+
+                        ))
+                      )}
                     </div>
+                  )}
+                  {formData.field && (
+                    <>
+                      <div className="space-y-2 mb-2">
+                        <Label htmlFor="date" className="flex items-center text-green-800">
+                          <Calendar className="w-4 h-4 mr-2" />
+                          Tarih *
+                        </Label>
+                        <Input
+                          id="date"
+                          type="date"
+                          value={formData.date}
+                          onChange={(e) => setFormData({ ...formData, date: e.target.value, time: "" })}
+                          className={`border-green-200 focus:border-green-500 focus:ring-green-500 ${errors.date ? "border-red-500" : ""}`}
+                          min={new Date().toISOString().split("T")[0]}
+                          required
+                        />
+                        {errors.date && <p className="text-sm text-red-500">{errors.date}</p>}
+                      </div>
+                      <FieldAvailability
+                        fieldId={formData.field}
+                        date={formData.date}
+                        selectedTime={selectedTime}
+                        selectedDuration={selectedDuration}
+                        onSelect={(time, duration) => {
+                          setSelectedTime(time);
+                          setSelectedDuration(duration);
+                          setFormData({ ...formData, time });
+                        }}
+                      />
+                      {errors.time && <p className="text-sm text-red-500 mt-1">{errors.time}</p>}
+                    </>
+                  )}
+
+                  {/* Match Type */}
                     <div className="space-y-2">
                       <Label htmlFor="matchType" className="text-green-800">
                         Maç Türü
@@ -428,27 +466,31 @@ export default function CreateMatchPage() {
                           <SelectItem value="training">Antrenman Maçı</SelectItem>
                         </SelectContent>
                       </Select>
-                    </div>
                   </div>
 
                   {/* Entry Fee */}
                   <div className="space-y-2">
-                    <Label htmlFor="entryFee" className="flex items-center text-green-800">
+                    <Label className="flex items-center text-green-800">
                       <DollarSign className="w-4 h-4 mr-2" />
-                      Takım Başına Maç Ücreti (₺) *
+                      Maliyet ve Rezervasyon Özeti
                     </Label>
-                    <Input
-                      id="entryFee"
-                      type="number"
-                      value={formData.entryFee}
-                      onChange={(e) => setFormData({ ...formData, entryFee: e.target.value })}
-                      placeholder="Örn: 150"
-                      className={`border-green-200 focus:border-green-500 focus:ring-green-500 ${errors.entryFee ? "border-red-500" : ""}`}
-                      min="0"
-                      required
-                    />
-                    {errors.entryFee && <p className="text-sm text-red-500">{errors.entryFee}</p>}
-                    <p className="text-sm text-green-600">Her takım bu ücreti ödeyecektir</p>
+                    <div className="p-3 bg-green-50 border border-green-200 rounded text-green-800">
+                      <div className="text-lg font-semibold mb-1">
+                        {selectedField && selectedTime ? `${Math.ceil((selectedField.hourly_rate * selectedDuration * 1.1) / 2)} ₺ / Takım` : "Saha ve saat seçin"}
+                      </div>
+                      {selectedTime && (
+                        <div className="text-sm space-y-1">
+                          <div><b>Tarih:</b> <span className="font-bold">{formData.date}</span></div>
+                          <div><b>Saat:</b> <span className="font-bold">{selectedTime} - {(() => {
+                            const HOURS = ["17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00", "00:00", "01:00", "02:00"];
+                            const idx = HOURS.indexOf(selectedTime);
+                            return HOURS[idx + selectedDuration] || "?";
+                          })()}</span></div>
+                          <div><b>Süre:</b> <span className="font-bold">{selectedDuration} saat</span></div>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-sm text-green-600">Her takım bu ücreti ödeyecektir. Ücret otomatik hesaplanır.</p>
                   </div>
 
                   {/* Notes */}
@@ -508,7 +550,7 @@ export default function CreateMatchPage() {
                       <div className="font-medium text-green-800">{selectedField.name}</div>
                       <div className="text-sm text-green-600">{selectedField.address}</div>
                       <div className="text-sm text-green-600">
-                        {formData.duration} dakika ({Number.parseInt(formData.duration) / 60} saat)
+                        {formData.time ? new Date(formData.date + "T" + formData.time).toLocaleTimeString([], { hour: 'numeric', minute: 'numeric' }) : "Süre seçin"}
                       </div>
                     </div>
 
