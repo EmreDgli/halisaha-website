@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ArrowLeft, Home, Search, Filter, MapPin, Users, Clock, Star, MessageCircle, UserPlus } from "lucide-react"
+import { ArrowLeft, Home, Search, Filter, MapPin, Users, Clock, Star, UserPlus, RefreshCw } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,11 +14,41 @@ import { Label } from "@/components/ui/label"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { getTeams } from '@/lib/api/teams';
 import { requestToJoinTeam } from '@/lib/api/teams';
+import { useAuthContext } from "@/components/AuthProvider"
+import { useRouter } from "next/navigation"
+
+interface Team {
+  id: string
+  name: string
+  description?: string
+  city?: string
+  district?: string
+  skillLevel?: number
+  preferredTime?: string
+  lookingForPlayers?: boolean
+  max_players?: number
+  currentMembers: number
+  maxPlayers: number
+  availableSlots: number
+  isFull: boolean
+  totalMatches: number
+  wins: number
+  draws: number
+  losses: number
+  winRate: number
+  upcomingMatches: number
+  recentMatches: any[]
+  lastActive: string
+  updated_at?: string
+  members?: any[]
+  avatar?: string
+  playersCount?: number
+}
 
 export default function TeamSearchPage() {
-  const [teams, setTeams] = useState<any[]>([])
+  const [teams, setTeams] = useState<Team[]>([])
   const [search, setSearch] = useState("")
-  const [filteredTeams, setFilteredTeams] = useState<any[]>([])
+  const [filteredTeams, setFilteredTeams] = useState<Team[]>([])
   const [filters, setFilters] = useState({
     location: "",
     skillLevels: [] as number[],
@@ -28,6 +58,18 @@ export default function TeamSearchPage() {
     maxPlayers: "",
   })
   const [isLoading, setIsLoading] = useState(false)
+  const { user, loading: authLoading, isAuthenticated } = useAuthContext()
+  const router = useRouter()
+
+  // Authentication kontrolü
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated || !user) {
+      console.log("Kullanıcı giriş yapmamış, login'e yönlendiriliyor");
+      router.push("/auth/login");
+      return;
+    }
+  }, [user, authLoading, isAuthenticated, router]);
 
   useEffect(() => {
     const fetchTeams = async () => {
@@ -64,12 +106,12 @@ export default function TeamSearchPage() {
 
     // Filter by skill levels
     if (filters.skillLevels.length > 0) {
-      filtered = filtered.filter((team) => filters.skillLevels.includes(team.skillLevel))
+      filtered = filtered.filter((team) => team.skillLevel && filters.skillLevels.includes(team.skillLevel))
     }
 
     // Filter by time preferences
     if (filters.timePreferences.length > 0) {
-      filtered = filtered.filter((team) => filters.timePreferences.includes(team.preferredTime))
+      filtered = filtered.filter((team) => team.preferredTime && filters.timePreferences.includes(team.preferredTime))
     }
 
     // Filter by looking for players
@@ -79,10 +121,10 @@ export default function TeamSearchPage() {
 
     // Filter by player count
     if (filters.minPlayers) {
-      filtered = filtered.filter((team) => team.playersCount >= Number.parseInt(filters.minPlayers))
+      filtered = filtered.filter((team) => team.currentMembers >= Number.parseInt(filters.minPlayers))
     }
     if (filters.maxPlayers) {
-      filtered = filtered.filter((team) => team.playersCount <= Number.parseInt(filters.maxPlayers))
+      filtered = filtered.filter((team) => team.currentMembers <= Number.parseInt(filters.maxPlayers))
     }
 
     setFilteredTeams(filtered)
@@ -96,6 +138,18 @@ export default function TeamSearchPage() {
         alert('Takıma katılma isteği gönderildi!');
       } else {
         alert('Katılma isteği gönderilemedi.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  const handleRefresh = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await getTeams();
+      if (!error && data) {
+        setTeams(data);
       }
     } finally {
       setIsLoading(false);
@@ -149,7 +203,16 @@ export default function TeamSearchPage() {
             <h1 className="text-xl font-bold bg-gradient-to-r from-green-700 to-green-600 bg-clip-text text-transparent">
               Takım Arama
             </h1>
-            <div className="w-24"></div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isLoading}
+              className="text-green-700 hover:text-green-800 hover:bg-green-50"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+              Yenile
+            </Button>
           </div>
         </div>
       </div>
@@ -319,13 +382,49 @@ export default function TeamSearchPage() {
           </div>
 
           <div className="flex items-center justify-between">
-            <p className="text-sm text-green-600">{filteredTeams.length} takım bulundu</p>
+            <p className="text-sm text-green-600">
+              {filteredTeams.length} takım bulundu
+              {teams.length > 0 && (
+                <span className="ml-2 text-gray-500">
+                  • Son güncelleme: {new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
+            </p>
           </div>
         </div>
 
         {/* Teams Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredTeams.length > 0 ? (
+          {isLoading ? (
+            // Loading skeletons
+            Array.from({ length: 6 }).map((_, index) => (
+              <Card key={`skeleton-${index}`} className="border-green-200">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-gray-200 rounded-full animate-pulse"></div>
+                    <div className="flex-1 space-y-2">
+                      <div className="h-5 bg-gray-200 rounded animate-pulse"></div>
+                      <div className="h-4 bg-gray-200 rounded animate-pulse w-3/4"></div>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
+                  <div className="flex flex-wrap gap-2">
+                    <div className="h-6 w-20 bg-gray-200 rounded animate-pulse"></div>
+                    <div className="h-6 w-16 bg-gray-200 rounded animate-pulse"></div>
+                    <div className="h-6 w-24 bg-gray-200 rounded animate-pulse"></div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
+                    <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
+                    <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
+                  </div>
+                  <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
+                </CardContent>
+              </Card>
+            ))
+          ) : filteredTeams.length > 0 ? (
             filteredTeams.map((team) => (
               <Card key={team.id || team.name} className="hover:shadow-lg transition-shadow duration-200 border-green-200">
               <CardHeader className="pb-3">
@@ -349,28 +448,46 @@ export default function TeamSearchPage() {
               </CardHeader>
 
               <CardContent className="space-y-4">
-                <p className="text-sm text-green-700">{team.description}</p>
+                {team.description && (
+                  <p className="text-sm text-green-700">{team.description}</p>
+                )}
 
                 <div className="flex flex-wrap gap-2">
-                  <Badge className={getSkillLevelColor(team.skillLevel)}>
-                    <Star className="h-3 w-3 mr-1" />
-                    {getSkillLevelText(team.skillLevel)}
-                  </Badge>
-                  <Badge className="bg-green-100 text-green-700 border-green-200">
+                  {team.skillLevel && (
+                    <Badge className={getSkillLevelColor(team.skillLevel)}>
+                      <Star className="h-3 w-3 mr-1" />
+                      {getSkillLevelText(team.skillLevel)}
+                    </Badge>
+                  )}
+                  <Badge className={`${team.isFull ? 'bg-red-100 text-red-700 border-red-200' : 'bg-green-100 text-green-700 border-green-200'}`}>
                     <Users className="h-3 w-3 mr-1" />
-                    {team.playersCount}/11
+                    {team.currentMembers}/{team.maxPlayers}
+                    {team.isFull && <span className="ml-1">• Dolu</span>}
                   </Badge>
-                  <Badge className="bg-green-100 text-green-700 border-green-200">
-                    <Clock className="h-3 w-3 mr-1" />
-                    {team.preferredTime}
-                  </Badge>
-                  {team.lookingForPlayers && <Badge className="bg-green-600 text-white">Oyuncu Arıyor</Badge>}
+                  {team.preferredTime && (
+                    <Badge className="bg-blue-100 text-blue-700 border-blue-200">
+                      <Clock className="h-3 w-3 mr-1" />
+                      {team.preferredTime}
+                    </Badge>
+                  )}
+                  {team.lookingForPlayers && !team.isFull && (
+                    <Badge className="bg-green-600 text-white">
+                      <UserPlus className="h-3 w-3 mr-1" />
+                      Oyuncu Arıyor
+                    </Badge>
+                  )}
+                  {team.availableSlots > 0 && (
+                    <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200">
+                      <Users className="h-3 w-3 mr-1" />
+                      {team.availableSlots} boş yer
+                    </Badge>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-3 gap-4 text-center text-sm">
                   <div>
-                    <p className="font-semibold text-green-800">{team.matchesPlayed}</p>
-                    <p className="text-green-600">Maç</p>
+                    <p className="font-semibold text-green-800">{team.totalMatches}</p>
+                    <p className="text-green-600">Toplam Maç</p>
                   </div>
                   <div>
                     <p className="font-semibold text-green-800">%{team.winRate}</p>
@@ -381,29 +498,56 @@ export default function TeamSearchPage() {
                     <p className="text-green-600">Son aktif</p>
                   </div>
                 </div>
+                
+                {/* Additional team info */}
+                <div className="grid grid-cols-2 gap-4 text-center text-sm">
+                  <div className="bg-gray-50 rounded-lg p-2 border border-gray-100">
+                    <p className="font-semibold text-blue-700">{team.wins}W - {team.draws}D - {team.losses}L</p>
+                    <p className="text-blue-600 text-xs">Sonuçlar</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-2 border border-gray-100">
+                    <p className="font-semibold text-purple-700">{team.upcomingMatches}</p>
+                    <p className="text-purple-600 text-xs">Yaklaşan Maç</p>
+                  </div>
+                </div>
 
                 <div className="flex space-x-2">
                   <Button
-                    className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                    className={`flex-1 ${team.isFull ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'} text-white`}
                     onClick={() => handleJoinRequest(team.id)}
-                    disabled={isLoading || ((team.members?.length ?? team.playersCount ?? 0) >= (team.maxPlayers ?? team.max_members ?? team.max_players ?? 11))}
+                    disabled={isLoading || team.isFull}
                   >
                     {isLoading ? (
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    ) : team.isFull ? (
+                      <Users className="h-4 w-4 mr-2" />
                     ) : (
                       <UserPlus className="h-4 w-4 mr-2" />
                     )}
-                    {((team.members?.length ?? team.playersCount ?? 0) >= (team.maxPlayers ?? team.max_members ?? team.max_players ?? 11)) ? "Kadro Dolu" : "Katılma İsteği Gönder"}
-                  </Button>
-                  <Button variant="outline" size="icon" className="border-green-200 text-green-700 hover:bg-green-50">
-                    <MessageCircle className="h-4 w-4" />
+                    {team.isFull ? "Kadro Dolu" : "Katılma İsteği Gönder"}
                   </Button>
                 </div>
               </CardContent>
             </Card>
             ))
           ) : (
-            <div className="col-span-full text-center text-green-600">Aradığınız kriterlere uygun takım bulunamadı.</div>
+            <div className="col-span-full text-center py-12">
+              <div className="max-w-md mx-auto">
+                <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Takım Bulunamadı</h3>
+                <p className="text-gray-600 mb-4">
+                  {search || Object.values(filters).some(f => f && (Array.isArray(f) ? f.length > 0 : true)) 
+                    ? "Aradığınız kriterlere uygun takım bulunamadı. Filtreleri değiştirmeyi deneyin."
+                    : "Henüz hiç takım bulunmuyor. Daha sonra tekrar kontrol edin."
+                  }
+                </p>
+                {(search || Object.values(filters).some(f => f && (Array.isArray(f) ? f.length > 0 : true))) && (
+                  <Button onClick={clearFilters} variant="outline" className="border-green-200 text-green-700">
+                    Filtreleri Temizle
+                  </Button>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>

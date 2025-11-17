@@ -11,9 +11,10 @@ import { Switch } from "@/components/ui/switch"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { ArrowLeft, User, Bell, Shield, Smartphone, Mail, Eye, EyeOff, CheckCircle, AlertCircle } from "lucide-react"
+import { ArrowLeft, User, Bell, Shield, Smartphone, Mail, Eye, EyeOff, CheckCircle, AlertCircle, Hash } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { useAuthContext } from "@/components/AuthProvider"
 
 interface UserData {
   id: string
@@ -25,6 +26,8 @@ interface UserData {
   companyName?: string
   roles: ("player" | "owner")[]
   createdAt: string
+  avatar_url?: string
+  tag?: string
 }
 
 interface NotificationSettings {
@@ -42,6 +45,8 @@ export default function SettingsPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
   const [activeTab, setActiveTab] = useState<"profile" | "notifications" | "security">("profile")
+  const { user: authUser, loading: authLoading, isAuthenticated } = useAuthContext()
+  const router = useRouter()
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -51,6 +56,7 @@ export default function SettingsPage() {
     currentPassword: "",
     newPassword: "",
     confirmPassword: "",
+    tag: "",
   })
 
   const [notifications, setNotifications] = useState<NotificationSettings>({
@@ -62,14 +68,31 @@ export default function SettingsPage() {
     pushNotifications: false,
   })
 
-  const router = useRouter()
-
+  // Authentication kontrolü
   useEffect(() => {
-    // Load current user
-    const currentUser = localStorage.getItem("currentUser")
-    if (currentUser) {
-      const userData = JSON.parse(currentUser) as UserData
-      setUser(userData)
+    if (authLoading) return;
+    if (!isAuthenticated || !authUser) {
+      console.log("Kullanıcı giriş yapmamış, login'e yönlendiriliyor");
+      router.push("/auth/login");
+      return;
+    }
+
+    // Kullanıcı verilerini ayarla
+    if (authUser.profile) {
+      const userData: UserData = {
+        id: authUser.user.id,
+        firstName: authUser.profile.full_name?.split(" ")[0] || "Kullanıcı",
+        lastName: authUser.profile.full_name?.split(" ")[1] || "",
+        email: authUser.user.email || "",
+        password: "",
+        phone: authUser.profile.phone || "",
+        companyName: "",
+        roles: authUser.profile.roles || [],
+        createdAt: authUser.user.created_at || "",
+        avatar_url: authUser.profile.avatar_url || undefined,
+        tag: authUser.profile.tag || undefined,
+      };
+      setUser(userData);
       setFormData({
         firstName: userData.firstName,
         lastName: userData.lastName,
@@ -78,9 +101,8 @@ export default function SettingsPage() {
         currentPassword: "",
         newPassword: "",
         confirmPassword: "",
-      })
-    } else {
-      router.push("/auth/login")
+        tag: userData.tag || "",
+      });
     }
 
     // Load notification settings
@@ -88,7 +110,7 @@ export default function SettingsPage() {
     if (savedNotifications) {
       setNotifications(JSON.parse(savedNotifications))
     }
-  }, [router])
+  }, [authUser, authLoading, isAuthenticated, router]);
 
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -98,6 +120,7 @@ export default function SettingsPage() {
     setMessage(null)
 
     try {
+      // Simulate API call
       await new Promise((resolve) => setTimeout(resolve, 1000))
 
       // Update user data
@@ -107,21 +130,13 @@ export default function SettingsPage() {
         lastName: formData.lastName,
         phone: formData.phone,
         companyName: formData.companyName,
+        tag: formData.tag,
       }
 
-      // Update in users array
-      const users = JSON.parse(localStorage.getItem("users") || "[]") as UserData[]
-      const userIndex = users.findIndex((u) => u.id === user.id)
-      if (userIndex >= 0) {
-        users[userIndex] = updatedUser
-        localStorage.setItem("users", JSON.stringify(users))
-      }
-
-      // Update current user
-      localStorage.setItem("currentUser", JSON.stringify(updatedUser))
       setUser(updatedUser)
+      localStorage.setItem("currentUser", JSON.stringify(updatedUser))
 
-      setMessage({ type: "success", text: "Profil bilgileriniz başarıyla güncellendi!" })
+      setMessage({ type: "success", text: "Profil başarıyla güncellendi!" })
     } catch (error) {
       setMessage({ type: "error", text: "Profil güncellenirken bir hata oluştu." })
     } finally {
@@ -217,6 +232,14 @@ export default function SettingsPage() {
                 Ayarlar
               </h1>
             </div>
+            <div className="flex items-center space-x-4">
+              <Link href="/profile">
+                <Button variant="outline" size="sm" className="border-blue-600 text-blue-600 hover:bg-blue-50">
+                  <User className="h-4 w-4 mr-2" />
+                  Profilim
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
       </div>
@@ -227,24 +250,20 @@ export default function SettingsPage() {
           <CardContent className="p-6">
             <div className="flex items-center space-x-4">
               <Avatar className="h-16 w-16">
-                <AvatarImage src="/placeholder.svg" alt={`${user.firstName} ${user.lastName}`} />
+                <AvatarImage src={user?.avatar_url || "/placeholder.svg"} alt={user?.firstName} />
                 <AvatarFallback className="bg-gradient-to-r from-green-500 to-green-600 text-white text-lg">
-                  {user.firstName.charAt(0)}
-                  {user.lastName.charAt(0)}
+                  {user?.firstName?.charAt(0) || "U"}
                 </AvatarFallback>
               </Avatar>
-              <div className="flex-1">
-                <h2 className="text-2xl font-bold text-green-800">
-                  {user.firstName} {user.lastName}
-                </h2>
-                <p className="text-green-600">{user.email}</p>
-                <div className="flex space-x-2 mt-2">
-                  {user.roles.map((role) => (
-                    <Badge key={role} className="bg-green-100 text-green-700 border-green-200">
-                      {role === "player" ? "Oyuncu" : "Saha Sahibi"}
-                    </Badge>
-                  ))}
-                </div>
+              <div>
+                <h2 className="text-xl font-bold text-green-800">{user?.firstName} {user?.lastName}</h2>
+                <p className="text-green-600">{user?.email}</p>
+                {user?.tag && (
+                  <div className="flex items-center space-x-1 mt-1">
+                    <Hash className="w-4 h-4 text-green-600" />
+                    <span className="text-sm font-medium text-green-700">{user.tag}</span>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>
@@ -330,13 +349,36 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="phone">Telefon Numarası</Label>
+                  <Label htmlFor="phone" className="flex items-center text-green-800">
+                    <Smartphone className="w-4 h-4 mr-2" />
+                    Telefon
+                  </Label>
                   <Input
                     id="phone"
+                    type="tel"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="border-green-200 focus:border-green-400"
+                    placeholder="0555 123 45 67"
+                    className="border-green-200 focus:border-green-500 focus:ring-green-500"
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="tag" className="flex items-center text-green-800">
+                    <Hash className="w-4 h-4 mr-2" />
+                    Kullanıcı Etiketi
+                  </Label>
+                  <Input
+                    id="tag"
+                    type="text"
+                    value={formData.tag}
+                    onChange={(e) => setFormData({ ...formData, tag: e.target.value })}
+                    placeholder="#1234"
+                    className="border-green-200 focus:border-green-500 focus:ring-green-500"
+                  />
+                  <p className="text-xs text-green-600">
+                    Bu etiket diğer kullanıcılar tarafından sizi bulmak için kullanılır
+                  </p>
                 </div>
 
                 {user.roles.includes("owner") && (

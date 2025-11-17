@@ -2,7 +2,37 @@
 
 import { supabase } from "../supabase"
 
-// Get user notifications
+// Bildirim oluştur
+export async function createNotification(data: {
+  user_id: string
+  title: string
+  message: string
+  type: "team_join" | "match_invite" | "general"
+  related_id?: string
+}) {
+  try {
+    const { data: notification, error } = await supabase
+      .from("notifications")
+      .insert({
+        user_id: data.user_id,
+        title: data.title,
+        message: data.message,
+        type: data.type,
+        related_id: data.related_id,
+        is_read: false,
+      })
+      .select()
+      .single()
+
+    if (error) throw error
+    return { data: notification, error: null }
+  } catch (error) {
+    console.error("createNotification error:", error)
+    return { data: null, error }
+  }
+}
+
+// Kullanıcının bildirimlerini getir
 export async function getUserNotifications() {
   try {
     const {
@@ -17,14 +47,14 @@ export async function getUserNotifications() {
       .order("created_at", { ascending: false })
 
     if (error) throw error
-
     return { data, error: null }
   } catch (error) {
+    console.error("getUserNotifications error:", error)
     return { data: null, error }
   }
 }
 
-// Mark notification as read
+// Bildirimi okundu olarak işaretle
 export async function markNotificationAsRead(notificationId: string) {
   try {
     const { data, error } = await supabase
@@ -35,54 +65,14 @@ export async function markNotificationAsRead(notificationId: string) {
       .single()
 
     if (error) throw error
-
     return { data, error: null }
   } catch (error) {
+    console.error("markNotificationAsRead error:", error)
     return { data: null, error }
   }
 }
 
-// Mark all notifications as read
-export async function markAllNotificationsAsRead() {
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) throw new Error("User not authenticated")
-
-    const { data, error } = await supabase
-      .from("notifications")
-      .update({ is_read: true })
-      .eq("user_id", user.id)
-      .eq("is_read", false)
-
-    if (error) throw error
-
-    return { data, error: null }
-  } catch (error) {
-    return { data: null, error }
-  }
-}
-
-// Delete notification
-export async function deleteNotification(notificationId: string) {
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) throw new Error("User not authenticated")
-
-    const { error } = await supabase.from("notifications").delete().eq("id", notificationId).eq("user_id", user.id)
-
-    if (error) throw error
-
-    return { error: null }
-  } catch (error) {
-    return { error }
-  }
-}
-
-// Get unread notification count
+// Okunmamış bildirim sayısını getir
 export async function getUnreadNotificationCount() {
   try {
     const {
@@ -97,10 +87,10 @@ export async function getUnreadNotificationCount() {
       .eq("is_read", false)
 
     if (error) throw error
-
-    return { count: count || 0, error: null }
+    return { data: count, error: null }
   } catch (error) {
-    return { count: 0, error }
+    console.error("getUnreadNotificationCount error:", error)
+    return { data: null, error }
   }
 }
 

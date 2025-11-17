@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator"
 import { CreditCard, Smartphone, Banknote, Shield, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { useAuthContext } from "@/components/AuthProvider"
 
 export default function PaymentPage() {
   const [paymentMethod, setPaymentMethod] = useState<"card" | "mobile" | "cash">("card")
@@ -23,6 +24,17 @@ export default function PaymentPage() {
   })
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
+  const { user, loading: authLoading, isAuthenticated } = useAuthContext()
+
+  // Authentication kontrolü
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated || !user) {
+      console.log("Kullanıcı giriş yapmamış, login'e yönlendiriliyor");
+      router.push("/auth/login");
+      return;
+    }
+  }, [user, authLoading, isAuthenticated, router]);
 
   const matchDetails = {
     homeTeam: "Yıldızlar FC",

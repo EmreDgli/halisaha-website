@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -11,19 +11,30 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Eye, EyeOff, User, Mail, Lock, Phone, ArrowLeft, Home } from "lucide-react"
+import { Eye, EyeOff, User, Mail, Lock, Phone, ArrowLeft, Home, Hash } from "lucide-react"
 import { registerUser } from "@/lib/api/auth"
+import { useAuthContext } from "@/components/AuthProvider"
 
 export default function RegisterPage() {
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
     email: "",
-    phone: "",
     password: "",
     confirmPassword: "",
-    roles: [] as ("player" | "field_owner" | "team_manager")[],
-    acceptTerms: false,
+    phone: "",
+    termsAccepted: false,
+    roles: [] as ("player" | "field_owner")[],
+    // Profil bilgileri
+    profileData: {
+      position: "",
+      skill_level: "",
+      preferred_city: "",
+      availability: "",
+      experience_years: 0,
+      preferred_time: "",
+      bio: ""
+    }
   })
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -31,6 +42,29 @@ export default function RegisterPage() {
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
   const [roleOption, setRoleOption] = useState<"player" | "field_owner" | "both" | "">("")
+  const { user, loading: authLoading, isAuthenticated, setUser } = useAuthContext()
+  const [currentUser, setCurrentUser] = useState<any>(null)
+
+  // Authentication kontrolü
+  useEffect(() => {
+    if (authLoading) return;
+    if (isAuthenticated && user) {
+      console.log("Kullanıcı zaten giriş yapmış, dashboard'a yönlendiriliyor");
+      // Kullanıcı zaten giriş yapmışsa uygun dashboard'a yönlendir
+      if (user.profile?.roles?.length > 1) {
+        router.push("/role-selection");
+      } else if (user.profile?.roles?.length === 1) {
+        const role = user.profile.roles[0];
+        if (role === "player") {
+          router.push("/dashboard/player");
+        } else if (role === "field_owner" || role === "owner") {
+          router.push("/dashboard/owner");
+        }
+      }
+      return;
+    }
+    // Kullanıcı giriş yapmamışsa register sayfasında kalabilir
+  }, [user, authLoading, isAuthenticated, router]);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {}
@@ -58,8 +92,8 @@ export default function RegisterPage() {
       newErrors.roles = "En az bir rol seçmelisiniz"
     }
 
-    if (!formData.acceptTerms) {
-      newErrors.acceptTerms = "Kullanım koşullarını kabul etmelisiniz"
+    if (!formData.termsAccepted) {
+      newErrors.termsAccepted = "Kullanım koşullarını kabul etmelisiniz"
     }
 
     setErrors(newErrors)
@@ -71,6 +105,16 @@ export default function RegisterPage() {
     if (value === "player") setFormData({ ...formData, roles: ["player"] })
     else if (value === "field_owner") setFormData({ ...formData, roles: ["field_owner"] })
     else if (value === "both") setFormData({ ...formData, roles: ["player", "field_owner"] })
+  }
+
+  const handleProfileDataChange = (field: string, value: string | number) => {
+    setFormData(prev => ({
+      ...prev,
+      profileData: {
+        ...prev.profileData,
+        [field]: value
+      }
+    }))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -85,38 +129,67 @@ export default function RegisterPage() {
     setErrors({})
 
     try {
-      const { data, error } = await registerUser({
-        email: formData.email,
-        password: formData.password,
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        phone: formData.phone,
-        roles: formData.roles,
-      })
+      console.log("📝 Register API çağrısı yapılıyor...")
+      const { data, error } = await registerUser(formData)
+      console.log("📝 Register API sonucu:", { data, error })
 
       if (error) {
-        console.log("Registration error from registerUser:", error)
-        if (typeof error === "object" && error !== null && "message" in error && typeof (error as any).message === "string" && (error as any).message.includes("already registered")) {
-          setErrors({ email: "Bu e-posta adresi zaten kayıtlı" })
+        console.log("❌ Register hatası:", error)
+        
+        // Kullanıcı dostu hata mesajları
+        const errorMessage = typeof error === 'object' && error !== null && 'message' in error 
+          ? (error as any).message 
+          : String(error);
+          
+        if (errorMessage.includes("User already registered") || 
+            errorMessage.includes("already registered") ||
+            errorMessage.includes("already exists") ||
+            errorMessage.includes("duplicate key")) {
+          setErrors({ general: "Bu e-posta adresi zaten kayıtlı. Giriş yapmayı deneyin." })
+        } else if (errorMessage.includes("password") || errorMessage.includes("Password")) {
+          setErrors({ password: "Şifre en az 6 karakter olmalıdır." })
+        } else if (errorMessage.includes("email") || errorMessage.includes("Email")) {
+          setErrors({ email: "Geçerli bir e-posta adresi giriniz." })
+        } else if (errorMessage.includes("Invalid email")) {
+          setErrors({ email: "Geçersiz e-posta formatı." })
+        } else if (errorMessage.includes("weak_password")) {
+          setErrors({ password: "Şifre çok zayıf. Daha güçlü bir şifre seçin." })
         } else {
-          setErrors({ general: "Kayıt başarısız. Lütfen tekrar deneyin." })
+          setErrors({ general: `Kayıt işlemi başarısız: ${errorMessage}` })
         }
         return
       }
 
       if (data) {
-        console.log("Registration successful, redirecting", data)
-        // Registration successful - redirect based on roles
-        if (formData.roles.length === 1) {
-          if (formData.roles.includes("player")) {
-            router.push("/dashboard/player")
-          } else if (formData.roles.includes("field_owner")) {
-            router.push("/dashboard/owner")
-          } else if (formData.roles.includes("team_manager")) {
-            router.push("/dashboard/manager")
+        console.log("Registration successful", data)
+        // Kullanıcı bilgilerini göster
+        if (data.profile) {
+          setCurrentUser(data.profile)
+          
+          // Authentication state'ini manuel olarak güncelle
+          if (data.user && data.profile) {
+            setUser({ user: data.user, profile: data.profile });
+            console.log("Authentication state güncellendi");
           }
-        } else {
-          router.push("/role-selection")
+          
+          // Kayıt başarılı olduğunda yönlendirme yap
+          const roles = data.profile.roles;
+          if (roles.length > 1) {
+            console.log("Kullanıcının birden fazla rolü var, role-selection'a yönlendiriliyor");
+            router.push("/role-selection");
+          } else if (roles.length === 1) {
+            const role = roles[0];
+            console.log("Kullanıcının tek rolü var, dashboard'a yönlendiriliyor:", role);
+            if (role === "player") {
+              router.push("/dashboard/player");
+            } else if (role === "field_owner" || role === "owner") {
+              router.push("/dashboard/owner");
+            }
+          } else {
+            // Varsayılan olarak player dashboard'a yönlendir
+            console.log("Varsayılan olarak player dashboard'a yönlendiriliyor");
+            router.push("/dashboard/player");
+          }
         }
       }
     } catch (error) {
@@ -160,8 +233,42 @@ export default function RegisterPage() {
           <CardContent>
             {errors.general && (
               <Alert className="mb-6 border-red-200 bg-red-50">
-                <AlertDescription className="text-red-700">{errors.general}</AlertDescription>
+                <AlertDescription className="text-red-700">
+                  {errors.general}
+                  {errors.general.includes("zaten kayıtlı") && (
+                    <div className="mt-2">
+                      <Link href="/auth/login">
+                        <Button variant="outline" size="sm" className="text-red-700 border-red-300 hover:bg-red-50">
+                          Giriş Yap
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
+                </AlertDescription>
               </Alert>
+            )}
+
+            {/* Kullanıcı Bilgileri */}
+            {currentUser && (
+              <div className="mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-green-800">
+                      Hoş geldiniz, {currentUser.full_name}!
+                    </h3>
+                    <p className="text-sm text-green-600">{currentUser.email}</p>
+                  </div>
+                  {currentUser.tag && (
+                    <div className="flex items-center space-x-1 px-3 py-1 bg-green-100 rounded-full">
+                      <Hash className="w-4 h-4 text-green-600" />
+                      <span className="text-sm font-medium text-green-700">{currentUser.tag}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-2 text-xs text-green-600">
+                  Hesabınız başarıyla oluşturuldu! Yönlendiriliyor...
+                </div>
+              </div>
             )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -332,18 +439,137 @@ export default function RegisterPage() {
                 {errors.roles && <p className="text-sm text-red-500">{errors.roles}</p>}
               </div>
 
+              {/* Profil Bilgileri - Sadece Oyuncu Rolü Seçildiğinde */}
+              {(roleOption === "player" || roleOption === "both") && (
+                <div className="space-y-4 p-4 bg-green-50 rounded-lg border border-green-200">
+                  <h3 className="text-lg font-semibold text-green-800">Futbol Profili</h3>
+                  
+                  {/* Mevki ve Seviye */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="position" className="text-green-800">Mevki</Label>
+                      <select
+                        id="position"
+                        value={formData.profileData.position}
+                        onChange={(e) => handleProfileDataChange("position", e.target.value)}
+                        className="w-full p-2 border border-green-200 rounded-md focus:border-green-500 focus:ring-green-500"
+                      >
+                        <option value="">Mevki seçin</option>
+                        <option value="Kaleci">Kaleci</option>
+                        <option value="Defans">Defans</option>
+                        <option value="Orta Saha">Orta Saha</option>
+                        <option value="Forvet">Forvet</option>
+                        <option value="Joker">Joker</option>
+                        <option value="Kaleci Hariç Her Yer">Kaleci Hariç Her Yer</option>
+                        <option value="Her Yer">Her Yer</option>
+                      </select>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="skill_level" className="text-green-800">Seviye</Label>
+                      <select
+                        id="skill_level"
+                        value={formData.profileData.skill_level}
+                        onChange={(e) => handleProfileDataChange("skill_level", e.target.value)}
+                        className="w-full p-2 border border-green-200 rounded-md focus:border-green-500 focus:ring-green-500"
+                      >
+                        <option value="">Seviye seçin</option>
+                        <option value="Başlangıç">Başlangıç</option>
+                        <option value="Orta">Orta</option>
+                        <option value="İleri">İleri</option>
+                        <option value="Profesyonel">Profesyonel</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Şehir ve Müsaitlik */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="preferred_city" className="text-green-800">Tercih Ettiğin Şehir</Label>
+                      <Input
+                        id="preferred_city"
+                        value={formData.profileData.preferred_city}
+                        onChange={(e) => handleProfileDataChange("preferred_city", e.target.value)}
+                        placeholder="Örn: İstanbul, Ankara"
+                        className="border-green-200 focus:border-green-500 focus:ring-green-500"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="availability" className="text-green-800">Müsaitlik</Label>
+                      <select
+                        id="availability"
+                        value={formData.profileData.availability}
+                        onChange={(e) => handleProfileDataChange("availability", e.target.value)}
+                        className="w-full p-2 border border-green-200 rounded-md focus:border-green-500 focus:ring-green-500"
+                      >
+                        <option value="">Müsaitlik seçin</option>
+                        <option value="Hafta içi">Hafta içi</option>
+                        <option value="Hafta sonu">Hafta sonu</option>
+                        <option value="Her zaman">Her zaman</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Deneyim ve Tercih Edilen Saat */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="experience_years" className="text-green-800">Deneyim (Yıl)</Label>
+                      <Input
+                        id="experience_years"
+                        type="number"
+                        min="0"
+                        max="50"
+                        value={formData.profileData.experience_years}
+                        onChange={(e) => handleProfileDataChange("experience_years", parseInt(e.target.value) || 0)}
+                        placeholder="0"
+                        className="border-green-200 focus:border-green-500 focus:ring-green-500"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="preferred_time" className="text-green-800">Tercih Ettiğin Saat</Label>
+                      <select
+                        id="preferred_time"
+                        value={formData.profileData.preferred_time}
+                        onChange={(e) => handleProfileDataChange("preferred_time", e.target.value)}
+                        className="w-full p-2 border border-green-200 rounded-md focus:border-green-500 focus:ring-green-500"
+                      >
+                        <option value="">Saat seçin</option>
+                        <option value="Sabah">Sabah</option>
+                        <option value="Öğlen">Öğlen</option>
+                        <option value="Akşam">Akşam</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Hakkımda */}
+                  <div className="space-y-2">
+                    <Label htmlFor="bio" className="text-green-800">Hakkımda (Opsiyonel)</Label>
+                    <textarea
+                      id="bio"
+                      value={formData.profileData.bio}
+                      onChange={(e) => handleProfileDataChange("bio", e.target.value)}
+                      placeholder="Kendiniz hakkında kısa bir açıklama yazın..."
+                      rows={3}
+                      className="w-full p-2 border border-green-200 rounded-md focus:border-green-500 focus:ring-green-500 resize-none"
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Terms */}
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="acceptTerms"
-                  checked={formData.acceptTerms}
-                  onCheckedChange={(checked) => setFormData({ ...formData, acceptTerms: checked as boolean })}
+                  checked={formData.termsAccepted}
+                  onCheckedChange={(checked) => setFormData({ ...formData, termsAccepted: checked as boolean })}
                 />
                 <Label htmlFor="acceptTerms" className="text-sm text-green-700">
                   Kullanım koşullarını ve gizlilik politikasını kabul ediyorum
                 </Label>
               </div>
-              {errors.acceptTerms && <p className="text-sm text-red-500">{errors.acceptTerms}</p>}
+              {errors.termsAccepted && <p className="text-sm text-red-500">{errors.termsAccepted}</p>}
 
               <Button
                 type="submit"

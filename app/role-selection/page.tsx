@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Users, Building2, Loader2, ArrowRight } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
+import { useAuthContext } from "@/components/AuthProvider"
 
 interface UserData {
   id: string
@@ -26,59 +27,62 @@ export default function RoleSelectionPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [user, setUser] = useState<UserData | null>(null)
   const router = useRouter()
+  const { user: authUser, loading: authLoading, isAuthenticated } = useAuthContext()
 
   useEffect(() => {
-    // Get current user from localStorage
-    try {
-      const currentUser = localStorage.getItem("currentUser")
-      if (currentUser) {
-        const userData = JSON.parse(currentUser) as UserData
-        setUser(userData)
-
-        // If user has only one role, redirect immediately
-        if (userData.roles.length === 1) {
-          const role = userData.roles[0]
-          if (role === "player") {
-            router.push("/dashboard/player")
-          } else {
-            router.push("/dashboard/owner")
-          }
-        }
-      } else {
-        // No user found, redirect to login
-        router.push("/auth/login")
-      }
-    } catch (error) {
-      console.error("Error loading user:", error)
-      router.push("/auth/login")
+    if (authLoading) return;
+    
+    // Kullanıcı giriş yapmamışsa login'e yönlendir
+    if (!isAuthenticated || !authUser) {
+      console.log("Kullanıcı giriş yapmamış, login'e yönlendiriliyor");
+      router.push("/auth/login");
+      return;
     }
-  }, [router])
 
-  const handleRoleSelection = async (role: "player" | "field_owner") => {
-    if (!user) return
-
-    setSelectedRole(role)
-    setIsLoading(true)
-
-    try {
-      // Simulate processing time
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      // Update current session role
-      const updatedUser = { ...user, currentRole: role }
-      localStorage.setItem("currentUser", JSON.stringify(updatedUser))
-
-      // Redirect to appropriate dashboard
+    // Kullanıcının tek rolü varsa direkt dashboard'a yönlendir
+    if (authUser.profile?.roles?.length === 1) {
+      const role = authUser.profile.roles[0];
+      console.log("Kullanıcının tek rolü var, dashboard'a yönlendiriliyor:", role);
       if (role === "player") {
-        router.push("/dashboard/player")
-      } else {
-        router.push("/dashboard/owner")
+        router.push("/dashboard/player");
+      } else if (role === "field_owner" || role === "owner") {
+        router.push("/dashboard/owner");
       }
-    } catch (error) {
-      console.error("Role selection error:", error)
-      setIsLoading(false)
-      setSelectedRole(null)
-      alert("Bir hata oluştu. Lütfen tekrar deneyin.")
+      return;
+    }
+
+    // Kullanıcının birden fazla rolü varsa role-selection'da kal
+    if (authUser.profile?.roles?.length > 1) {
+      console.log("Kullanıcının birden fazla rolü var, role-selection'da kalıyor");
+      setUser({
+        id: authUser.user.id,
+        firstName: authUser.profile.full_name?.split(" ")[0] || "Kullanıcı",
+        lastName: authUser.profile.full_name?.split(" ")[1] || "",
+        email: authUser.user.email || "",
+        password: "",
+        phone: authUser.profile.phone || "",
+        roles: authUser.profile.roles || [],
+        createdAt: authUser.user.created_at || "",
+        full_name: authUser.profile.full_name || "",
+      });
+      return;
+    }
+
+    // Kullanıcının hiç rolü yoksa anasayfaya yönlendir
+    console.log("Kullanıcının hiç rolü yok, anasayfaya yönlendiriliyor");
+    router.push("/");
+  }, [authUser, authLoading, isAuthenticated, router]);
+
+  const handleRoleSelection = (role: string) => {
+    console.log("Seçilen rol:", role)
+    
+    // Seçilen role göre yönlendir
+    if (role === "player") {
+      console.log("Player dashboard'a yönlendiriliyor")
+      router.push("/dashboard/player")
+    } else if (role === "field_owner" || role === "owner") {
+      console.log("Owner dashboard'a yönlendiriliyor")
+      router.push("/dashboard/owner")
     }
   }
 

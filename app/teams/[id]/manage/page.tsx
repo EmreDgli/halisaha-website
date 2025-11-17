@@ -20,10 +20,15 @@ import {
   Home,
   Calendar,
   Trophy,
+  Trash2,
+  AlertTriangle,
+  Hash,
+  Mail,
 } from "lucide-react"
 import Link from "next/link"
 import { useAuthContext } from "@/components/AuthProvider"
 import { getTeamJoinRequests, handleTeamJoinRequest, deleteTeam } from '@/lib/api/teams';
+import { searchUsers, inviteUserToTeam } from '@/lib/api/users';
 import { useRouter } from 'next/navigation';
 
 interface Team {
@@ -65,6 +70,15 @@ export default function TeamManagePage({ params }: { params: any }) {
   const [error, setError] = useState<string | null>(null)
   const [joinRequests, setJoinRequests] = useState<any[]>([]);
   const router = useRouter();
+
+  // Kullanıcı arama ve davet etme için state'ler
+  const [userSearchQuery, setUserSearchQuery] = useState("")
+  const [searchResults, setSearchResults] = useState<any[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [showInviteModal, setShowInviteModal] = useState(false)
+  const [inviteMessage, setInviteMessage] = useState("")
+  const [invitingUser, setInvitingUser] = useState<any>(null)
+  const [isInviting, setIsInviting] = useState(false)
 
   useEffect(() => {
     const fetchTeam = async () => {
@@ -199,6 +213,59 @@ export default function TeamManagePage({ params }: { params: any }) {
     }
   }
 
+  // Kullanıcı arama fonksiyonu
+  const handleUserSearch = async (query: string) => {
+    if (!query.trim()) {
+      setSearchResults([])
+      return
+    }
+
+    setIsSearching(true)
+    try {
+      const { data, error } = await searchUsers(query)
+      if (error) {
+        console.error("Kullanıcı arama hatası:", error)
+        setSearchResults([])
+      } else {
+        // Mevcut üyeleri filtrele
+        const filteredResults = data?.filter((user: any) => 
+          !members.some(member => member.id === user.id)
+        ) || []
+        setSearchResults(filteredResults)
+      }
+    } catch (error) {
+      console.error("Kullanıcı arama hatası:", error)
+      setSearchResults([])
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  // Kullanıcı davet etme fonksiyonu
+  const handleInviteUser = async (userId: string, message?: string) => {
+    if (!team) return
+
+    setIsInviting(true)
+    try {
+      const { data, error } = await inviteUserToTeam(userId, team.id, message)
+      if (error) {
+        alert(`Davet gönderilemedi: ${error}`)
+      } else {
+        alert("Davet başarıyla gönderildi!")
+        setShowInviteModal(false)
+        setInvitingUser(null)
+        setInviteMessage("")
+        setSearchResults([])
+        setUserSearchQuery("")
+      }
+    } catch (error) {
+      console.error("Davet hatası:", error)
+      alert("Davet gönderilirken bir hata oluştu")
+    } finally {
+      setIsInviting(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100">
       {/* Header */}
@@ -219,7 +286,21 @@ export default function TeamManagePage({ params }: { params: any }) {
               {team ? team.name : "Takım ismi yükleniyor..."}
             </span>
           </div>
-          <div style={{ width: 120 }} /> {/* sağda boşluk için */}
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="outline"
+              className="border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 hover:text-red-700"
+              onClick={async () => {
+                if (confirm('⚠️ Takımı silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz ve tüm takım verileri silinecektir!')) {
+                  await deleteTeam(team.id);
+                  router.push('/dashboard/player');
+                }
+              }}
+            >
+              <AlertTriangle className="w-4 h-4 mr-2" />
+              Takımı Sil
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -294,7 +375,11 @@ export default function TeamManagePage({ params }: { params: any }) {
                       <Users className="w-5 h-5 mr-2" />
                       Takım Üyeleri ({members.length})
                     </CardTitle>
-                    <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white">
+                    <Button 
+                      size="sm" 
+                      className="bg-green-600 hover:bg-green-700 text-white"
+                      onClick={() => setShowInviteModal(true)}
+                    >
                       <UserPlus className="w-4 h-4 mr-1" />
                       Davet Et
                     </Button>
@@ -526,15 +611,11 @@ export default function TeamManagePage({ params }: { params: any }) {
               {/* Diğer ayar alanları buraya eklenebilir */}
               <Button
                 variant="outline"
-                className="border-red-200 text-red-600 hover:bg-red-50"
-                onClick={async () => {
-                  if (confirm('Takımı silmek istediğinize emin misiniz? Bu işlem geri alınamaz!')) {
-                    await deleteTeam(team.id);
-                    router.push('/dashboard/player');
-                  }
-                }}
+                className="border-green-200 text-green-700 hover:bg-green-50"
+                onClick={() => alert("Takım ayarları yakında!")}
               >
-                Takımı Sil
+                <Settings className="w-4 h-4 mr-2" />
+                Takım Ayarlarını Düzenle
               </Button>
             </CardContent>
           </Card>
@@ -570,6 +651,173 @@ export default function TeamManagePage({ params }: { params: any }) {
           )}
         </div>
       </div>
+
+      {/* Kullanıcı Arama ve Davet Modal */}
+      {showInviteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-green-800">Kullanıcı Davet Et</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowInviteModal(false)
+                  setUserSearchQuery("")
+                  setSearchResults([])
+                  setInvitingUser(null)
+                  setInviteMessage("")
+                }}
+              >
+                ✕
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Arama Kutusu */}
+              <div>
+                <label className="block text-sm font-medium text-green-700 mb-2">
+                  Kullanıcı Ara (İsim veya Etiket)
+                </label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-green-400 w-4 h-4" />
+                  <Input
+                    placeholder="İsim veya #1234 şeklinde etiket girin..."
+                    value={userSearchQuery}
+                    onChange={(e) => {
+                      setUserSearchQuery(e.target.value)
+                      if (e.target.value.length >= 2) {
+                        handleUserSearch(e.target.value)
+                      } else {
+                        setSearchResults([])
+                      }
+                    }}
+                    className="pl-10 border-green-200 focus:border-green-500 focus:ring-green-500"
+                  />
+                </div>
+              </div>
+
+              {/* Arama Sonuçları */}
+              {isSearching && (
+                <div className="text-center py-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600 mx-auto"></div>
+                  <p className="text-sm text-green-600 mt-2">Aranıyor...</p>
+                </div>
+              )}
+
+              {searchResults.length > 0 && (
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  <h4 className="text-sm font-medium text-green-700">Bulunan Kullanıcılar:</h4>
+                  {searchResults.map((user) => (
+                    <div
+                      key={user.id}
+                      className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <Avatar className="w-8 h-8">
+                          <AvatarFallback className="bg-green-200 text-green-700 text-xs">
+                            {user.full_name?.split(" ").map((n: string) => n[0]).join("") || "U"}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-medium text-green-800">{user.full_name}</p>
+                          <div className="flex items-center space-x-1">
+                            <Hash className="w-3 h-3 text-green-600" />
+                            <span className="text-sm text-green-600">{user.tag}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                        onClick={() => {
+                          setInvitingUser(user)
+                          setInviteMessage("")
+                        }}
+                      >
+                        <Mail className="w-3 h-3 mr-1" />
+                        Davet Et
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {userSearchQuery.length > 0 && searchResults.length === 0 && !isSearching && (
+                <div className="text-center py-4">
+                  <p className="text-sm text-gray-500">Kullanıcı bulunamadı</p>
+                </div>
+              )}
+
+              {/* Davet Mesajı */}
+              {invitingUser && (
+                <div className="space-y-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex items-center space-x-3">
+                    <Avatar className="w-8 h-8">
+                      <AvatarFallback className="bg-blue-200 text-blue-700 text-xs">
+                        {invitingUser.full_name?.split(" ").map((n: string) => n[0]).join("") || "U"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="font-medium text-blue-800">{invitingUser.full_name}</p>
+                      <div className="flex items-center space-x-1">
+                        <Hash className="w-3 h-3 text-blue-600" />
+                        <span className="text-sm text-blue-600">{invitingUser.tag}</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-blue-700 mb-2">
+                      Davet Mesajı (Opsiyonel)
+                    </label>
+                    <textarea
+                      value={inviteMessage}
+                      onChange={(e) => setInviteMessage(e.target.value)}
+                      placeholder="Takımımıza katılmanızı istiyoruz!"
+                      className="w-full p-2 border border-blue-200 rounded-md focus:border-blue-500 focus:ring-blue-500"
+                      rows={3}
+                    />
+                  </div>
+
+                  <div className="flex space-x-2">
+                    <Button
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                      onClick={() => handleInviteUser(invitingUser.id, inviteMessage)}
+                      disabled={isInviting}
+                    >
+                      {isInviting ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      ) : (
+                        <Mail className="w-4 h-4 mr-2" />
+                      )}
+                      {isInviting ? "Gönderiliyor..." : "Davet Gönder"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="border-blue-200 text-blue-700 hover:bg-blue-50"
+                      onClick={() => {
+                        setInvitingUser(null)
+                        setInviteMessage("")
+                      }}
+                    >
+                      İptal
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Kullanım Talimatları */}
+              <div className="text-xs text-gray-500 space-y-1">
+                <p><strong>Nasıl Kullanılır:</strong></p>
+                <p>• Kullanıcının adını yazarak arayabilirsiniz</p>
+                <p>• Veya kullanıcının etiketini (#1234) yazarak arayabilirsiniz</p>
+                <p>• Bulunan kullanıcıya davet gönderebilirsiniz</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

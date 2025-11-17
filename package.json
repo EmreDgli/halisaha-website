@@ -2,11 +2,17 @@
   "name": "my-v0-project",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "build": "next build",
     "dev": "next dev",
     "lint": "next lint",
-    "start": "next start"
+    "start": "next start",
+    "assign-tags": "node scripts/assign-tags.js",
+    "test-tags": "node scripts/test-user-tags.js",
+    "check-schema": "node scripts/check-database-schema.js",
+    "check-rls": "node scripts/check-rls-policies.js",
+    "check-tag-column": "node scripts/check-tag-column.js"
   },
   "dependencies": {
     "@fullcalendar/daygrid": "^6.1.18",

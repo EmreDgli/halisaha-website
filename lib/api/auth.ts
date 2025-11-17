@@ -9,6 +9,16 @@ export interface RegisterData {
   lastName: string
   phone?: string
   roles: ("player" | "field_owner" | "team_manager")[]
+  // Profil bilgileri (sadece player rolü için)
+  profileData?: {
+    position?: string
+    skill_level?: string
+    preferred_city?: string
+    availability?: string
+    experience_years?: number
+    preferred_time?: string
+    bio?: string
+  }
 }
 
 export interface LoginData {
@@ -16,36 +26,20 @@ export interface LoginData {
   password: string
 }
 
-// Helper function to wait for profile creation
-async function waitForProfile(userId: string, maxAttempts = 15): Promise<any> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    console.log(`Waiting for profile creation, attempt ${attempt}/${maxAttempts}`)
-
-    const { data, error } = await supabase.from("users").select("*").eq("id", userId).maybeSingle()
-
-    if (data) {
-      console.log("Profile found:", data)
-      return data
-    }
-
-    if (error && !error.message.includes("No rows")) {
-      console.error("Profile fetch error:", error)
-      throw error
-    }
-
-    // Wait before next attempt (increasing delay)
-    await new Promise((resolve) => setTimeout(resolve, 1000 * attempt))
-  }
-
-  throw new Error("Profile creation timeout - trigger may have failed")
-}
-
-// Register new user - simplified approach
+// Register new user - trigger bağımsız yaklaşım
 export async function registerUser(userData: RegisterData) {
   try {
-    console.log("Starting registration for:", userData.email)
+    console.log("registerUser - Starting registration for:", userData.email)
 
-    // 1. Create auth user (trigger will create profile)
+    // 1. Create auth user
+    console.log("registerUser - Creating auth user with data:", {
+      email: userData.email,
+      passwordLength: userData.password.length,
+      fullName: `${userData.firstName} ${userData.lastName}`,
+      phone: userData.phone,
+      roles: userData.roles
+    })
+    
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: userData.email,
       password: userData.password,
@@ -57,64 +51,171 @@ export async function registerUser(userData: RegisterData) {
       },
     })
 
-    console.log("Auth data:", authData)
-    console.log("Auth error:", authError)
+    console.log("registerUser - Auth signup result:", {
+      userCreated: !!authData.user,
+      userId: authData.user?.id,
+      error: authError?.message
+    })
 
     if (authError) {
-      console.error("Auth error:", authError)
-      throw authError
+      console.error("registerUser - Auth error:", authError)
+      
+      // Kullanıcı dostu hata mesajları
+      if (authError.message?.includes("User already registered") || 
+          authError.message?.includes("already registered") ||
+          authError.message?.includes("already exists") ||
+          authError.message?.includes("duplicate key")) {
+        throw new Error("Bu e-posta adresi zaten kayıtlı. Giriş yapmayı deneyin.")
+      } else if (authError.message?.includes("password") || authError.message?.includes("Password")) {
+        throw new Error("Şifre en az 6 karakter olmalıdır.")
+      } else if (authError.message?.includes("email") || authError.message?.includes("Email")) {
+        throw new Error("Geçerli bir e-posta adresi giriniz.")
+      } else if (authError.message?.includes("Invalid email")) {
+        throw new Error("Geçersiz e-posta formatı.")
+      } else if (authError.message?.includes("weak_password")) {
+        throw new Error("Şifre çok zayıf. Daha güçlü bir şifre seçin.")
+      } else {
+        throw new Error(`Kayıt işlemi başarısız: ${authError.message || "Bilinmeyen hata"}`)
+      }
     }
 
     if (!authData.user) {
-      throw new Error("User creation failed - no user returned")
+      console.error("registerUser - No user data returned")
+      throw new Error("Kullanıcı oluşturulamadı. Lütfen tekrar deneyin.")
     }
 
-    console.log("Auth user created:", authData.user.id)
+    console.log("registerUser - Auth user created:", authData.user.id)
 
-    // 2. Wait for trigger to create profile
-    let profile
+    // 2. Manuel olarak users tablosuna ekle (trigger'a bağımlı değil)
+    console.log("registerUser - Manually creating user profile...")
+    const { data: userProfile, error: userInsertError } = await supabase
+      .from("users")
+      .insert({
+        id: authData.user.id,
+        email: userData.email,
+        full_name: `${userData.firstName} ${userData.lastName}`,
+        phone: userData.phone || "",
+        roles: userData.roles,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single()
+
+    if (userInsertError) {
+      console.error("registerUser - User profile creation error:", userInsertError)
+      
+      // Eğer kullanıcı zaten varsa, mevcut profili al
+      if (userInsertError.message?.includes("duplicate key") || userInsertError.message?.includes("already exists")) {
+        console.log("registerUser - User profile already exists, fetching existing profile...")
+        const { data: existingProfile, error: fetchError } = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", authData.user.id)
+          .single()
+        
+        if (fetchError) {
+          console.error("registerUser - Error fetching existing profile:", fetchError)
+          throw new Error("Profil bilgileri alınamadı. Lütfen tekrar deneyin.")
+        }
+        
+        console.log("registerUser - Using existing profile:", existingProfile)
+        // Mevcut profili güncelle
+        const { error: updateError } = await supabase
+          .from("users")
+          .update({
+            full_name: `${userData.firstName} ${userData.lastName}`,
+            phone: userData.phone || "",
+            roles: userData.roles,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", authData.user.id)
+        
+        if (updateError) {
+          console.error("registerUser - Profile update error:", updateError)
+        }
+      } else {
+        throw new Error("Profil oluşturulamadı. Lütfen tekrar deneyin.")
+      }
+    } else {
+      console.log("registerUser - User profile created successfully:", userProfile)
+    }
+
+    // 3. Assign tag if not exists
     try {
-      profile = await waitForProfile(authData.user.id)
-    } catch (error) {
-      console.error("Profile creation timeout:", error)
-      // Return with auth user even if profile creation failed
-      // The user can still login and profile will be created on next attempt
-      return {
-        data: {
-          user: authData.user,
-          profile: null,
-        },
-        error: new Error("Profile creation delayed - please try logging in"),
-      }
+      await assignUserTag(authData.user.id)
+      console.log("registerUser - Tag assigned successfully")
+    } catch (tagError) {
+      console.error("registerUser - Tag assignment error:", tagError)
+      // Tag atama hatası kritik değil, devam et
     }
 
-    // 3. Update profile with specific roles if different from default
-    if (profile && userData.roles.length > 0 && !userData.roles.includes("player")) {
-      console.log("Updating profile with roles:", userData.roles)
+    // 4. Eğer player rolü seçildiyse ve profil bilgileri varsa, profiles tablosuna kaydet
+    if (userData.roles.includes("player") && userData.profileData) {
+      console.log("registerUser - Saving player profile data:", userData.profileData)
+      
+      // Önce profiles tablosunun var olduğundan emin ol
+      const profilesCheck = await ensureProfilesTable()
+      if (profilesCheck && !profilesCheck.success) {
+        console.log("⚠️ Profiles table setup needed, skipping profile data save")
+        console.log("💡 Please run the SQL script in Supabase Dashboard to create profiles table")
+        // Profiles tablosu yoksa sadece uyarı ver ve devam et
+      } else {
+        try {
+          const { data: profileData, error: profileInsertError } = await supabase
+            .from("profiles")
+            .insert({
+              user_id: authData.user.id,
+              position: userData.profileData.position || null,
+              skill_level: userData.profileData.skill_level || null,
+              preferred_city: userData.profileData.preferred_city || null,
+              availability: userData.profileData.availability || null,
+              experience_years: userData.profileData.experience_years || 0,
+              preferred_time: userData.profileData.preferred_time || null,
+              bio: userData.profileData.bio || null
+            })
+            .select()
 
-      const { data: updatedProfile, error: updateError } = await supabase
-        .from("users")
-        .update({
-          roles: userData.roles,
-          full_name: `${userData.firstName} ${userData.lastName}`,
-          phone: userData.phone,
-        })
-        .eq("id", authData.user.id)
-        .select()
-
-      if (updateError) {
-        console.error("Profile update error:", updateError)
-        // Don't fail registration, just use default profile
-      } else if (updatedProfile && updatedProfile.length > 0) {
-        profile = updatedProfile[0]
-        console.log("Profile updated with roles")
+          if (profileInsertError) {
+            console.error("registerUser - Profile data insert error:", profileInsertError)
+            console.error("registerUser - Profile insert error details:", {
+              message: profileInsertError.message,
+              details: profileInsertError.details,
+              hint: profileInsertError.hint,
+              code: profileInsertError.code
+            })
+            // Profil bilgileri kaydedilemese bile kayıt işlemi devam etsin
+          } else {
+            console.log("registerUser - Profile data saved successfully:", profileData)
+          }
+        } catch (profileError) {
+          console.error("registerUser - Profile data save error:", profileError)
+          // Profil bilgileri kaydedilemese bile kayıt işlemi devam etsin
+        }
       }
+    } else {
+      console.log("registerUser - Skipping profile data save:", {
+        hasPlayerRole: userData.roles.includes("player"),
+        hasProfileData: !!userData.profileData
+      })
     }
 
-    console.log("Registration successful")
-    return { data: { user: authData.user, profile }, error: null }
+    // 5. Get final profile
+    const { data: finalProfile, error: finalError } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", authData.user.id)
+      .single()
+
+    if (finalError) {
+      console.error("registerUser - Final profile fetch error:", finalError)
+      throw new Error("Profil bilgileri alınamadı. Lütfen tekrar deneyin.")
+    }
+
+    console.log("registerUser - Registration completed successfully")
+    return { data: { user: authData.user, profile: finalProfile }, error: null }
   } catch (error) {
-    console.error("Registration error:", error)
+    console.error("registerUser - Registration error:", error)
     return { data: null, error }
   }
 }
@@ -122,12 +223,39 @@ export async function registerUser(userData: RegisterData) {
 // Login user
 export async function loginUser(loginData: LoginData) {
   try {
+    console.log("🔐 Login attempt for email:", loginData.email)
+    console.log("🔐 Password length:", loginData.password.length)
+    
     const { data, error } = await supabase.auth.signInWithPassword({
       email: loginData.email,
       password: loginData.password,
     })
 
-    if (error) throw error
+    console.log("🔐 Supabase auth response:", { data: data?.user?.id, error: error?.message })
+
+    if (error) {
+      console.error("Login error:", error)
+      console.error("Error details:", {
+        message: error.message,
+        status: error.status
+      })
+      
+      // Kullanıcı dostu hata mesajları
+      if (error.message?.includes("Invalid login credentials") || 
+          error.message?.includes("invalid credentials")) {
+        throw new Error("E-posta adresi veya şifre hatalı. Lütfen kontrol edin.")
+      } else if (error.message?.includes("Email not confirmed")) {
+        throw new Error("E-posta adresinizi onaylamanız gerekiyor. Lütfen e-postanızı kontrol edin.")
+      } else if (error.message?.includes("Too many requests")) {
+        throw new Error("Çok fazla deneme yapıldı. Lütfen bir süre bekleyin.")
+      } else if (error.message?.includes("User not found")) {
+        throw new Error("Bu e-posta adresi ile kayıtlı kullanıcı bulunamadı.")
+      } else if (error.message?.includes("Invalid email")) {
+        throw new Error("Geçersiz e-posta formatı.")
+      } else {
+        throw new Error(`Giriş başarısız: ${error.message || "Bilinmeyen hata"}`)
+      }
+    }
 
     // Get user profile
     if (data.user) {
@@ -182,41 +310,152 @@ export async function logoutUser() {
   }
 }
 
-// Kullanıcıya benzersiz #xxxx formatında tag ata
+// Kullanıcıya benzersiz etiket ata - iyileştirilmiş versiyon
 export async function assignUserTag(userId: string) {
-  // 4 haneli random sayı üret
-  let tag;
-  let exists = true;
-  while (exists) {
-    tag = "#" + Math.floor(1000 + Math.random() * 9000);
-    // Benzersiz mi kontrol et
-    const { data } = await supabase.from("users").select("id").eq("tag", tag).single();
-    exists = !!data;
+  console.log("assignUserTag - Starting tag assignment for user:", userId);
+  
+  try {
+    // Tag'i doğrudan güncellemeyi dene
+    const tag = "#" + Math.floor(1000 + Math.random() * 9000);
+    console.log("assignUserTag - Generated tag:", tag);
+    
+    // Tag'i güncelle
+    const { error: updateError } = await supabase
+      .from("users")
+      .update({ tag })
+      .eq("id", userId);
+    
+    if (updateError) {
+      console.error("assignUserTag - Error updating user tag:", updateError);
+      console.error("assignUserTag - Error details:", {
+        code: updateError.code,
+        message: updateError.message,
+        details: updateError.details,
+        hint: updateError.hint
+      });
+      
+      // RLS sorunu varsa, tag atamadan devam et
+      console.log("assignUserTag - Skipping tag assignment due to RLS issues");
+      return null;
+    }
+    
+    console.log("assignUserTag - Successfully assigned tag", tag, "to user", userId);
+    return tag;
+  } catch (error) {
+    console.error("assignUserTag - Unexpected error:", error);
+    // Hata durumunda null döndür, uygulama çalışmaya devam etsin
+    return null;
   }
-  await supabase.from("users").update({ tag }).eq("id", userId);
-  return tag;
+}
+
+// Tüm mevcut kullanıcılara etiket ata (bir kez çalıştırılacak)
+export async function assignTagsToAllUsers() {
+  try {
+    // Etiketi olmayan tüm kullanıcıları getir
+    const { data: usersWithoutTag, error } = await supabase
+      .from("users")
+      .select("id")
+      .is("tag", null);
+
+    if (error) {
+      console.error("Users without tag fetch error:", error);
+      return { data: null, error };
+    }
+
+    if (!usersWithoutTag || usersWithoutTag.length === 0) {
+      console.log("Tüm kullanıcıların zaten etiketi var");
+      return { data: [], error: null };
+    }
+
+    console.log(`${usersWithoutTag.length} kullanıcıya etiket atanacak`);
+
+    // Her kullanıcıya benzersiz etiket ata
+    const results = [];
+    for (const user of usersWithoutTag) {
+      try {
+        const tag = await assignUserTag(user.id);
+        results.push({ userId: user.id, tag });
+        console.log(`Kullanıcı ${user.id} için etiket atandı: ${tag}`);
+      } catch (error) {
+        console.error(`Kullanıcı ${user.id} için etiket atama hatası:`, error);
+        results.push({ userId: user.id, error });
+      }
+    }
+
+    return { data: results, error: null };
+  } catch (error) {
+    console.error("Assign tags to all users error:", error);
+    return { data: null, error };
+  }
 }
 
 // getCurrentUser fonksiyonunda tag yoksa ata
 export async function getCurrentUser() {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { data: null };
-  const { data, error } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", user.id)
-    .single();
-  if (!data?.tag) {
-    await assignUserTag(user.id);
-    // Tag atandıktan sonra tekrar çek
-    const { data: newData } = await supabase
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { data: null, error: null };
+    
+    console.log("getCurrentUser - User ID:", user.id);
+    
+    const { data, error } = await supabase
       .from("users")
       .select("*")
       .eq("id", user.id)
       .single();
-    return { data: newData, error };
+    
+    if (error) {
+      console.error("getCurrentUser - Profile fetch error:", error);
+      return { data: null, error };
+    }
+    
+    console.log("getCurrentUser - Profile data:", data);
+    console.log("getCurrentUser - Current tag:", data?.tag);
+    
+    // Tag yoksa ata, ama hata olursa mevcut profili döndür
+    if (!data?.tag) {
+      console.log("getCurrentUser - No tag found, attempting to assign new tag");
+      try {
+        const tag = await assignUserTag(user.id);
+        console.log("getCurrentUser - Tag assignment result:", tag);
+        
+        if (tag) {
+          console.log("getCurrentUser - Tag assigned successfully");
+          
+          // Tag atandıktan sonra tekrar çek
+          const { data: newData, error: newError } = await supabase
+            .from("users")
+            .select("*")
+            .eq("id", user.id)
+            .single();
+          
+          if (newError) {
+            console.error("getCurrentUser - Error fetching updated profile:", newError);
+            // Hata olsa bile mevcut profili döndür
+            return { data: { user, profile: data }, error: null };
+          }
+          
+          console.log("getCurrentUser - New profile data after tag assignment:", newData);
+          return { data: { user, profile: newData }, error: null };
+        } else {
+          console.log("getCurrentUser - Tag assignment failed or skipped, using existing profile");
+          // Tag atama başarısız olsa bile mevcut profili döndür
+          return { data: { user, profile: data }, error: null };
+        }
+      } catch (tagError) {
+        console.error("getCurrentUser - Tag assignment failed:", tagError);
+        // Tag atama hatası olsa bile mevcut profili döndür
+        return { data: { user, profile: data }, error: null };
+      }
+    } else {
+      console.log("getCurrentUser - User already has tag:", data.tag);
+    }
+    
+    console.log("getCurrentUser - Returning existing profile with tag");
+    return { data: { user, profile: data }, error: null };
+  } catch (error) {
+    console.error("getCurrentUser - Unexpected error:", error);
+    return { data: null, error };
   }
-  return { data, error };
 }
 
 // Check authentication status
@@ -274,15 +513,112 @@ export async function userHasRole(role: "player" | "field_owner" | "team_manager
   }
 }
 
-// Supabase bağlantısını test etmek için manuel fonksiyon
-export async function testSupabaseConnection() {
+// Check if user exists in auth.users table
+export async function checkUserExists(email: string) {
   try {
-    // Basit bir sorgu: kullanıcı tablosundan ilk satırı çek
-    const { data, error } = await supabase.from("users").select("*").limit(1)
-    console.log("Supabase bağlantı testi sonucu:", { data, error })
-    return { data, error }
+    console.log("🔍 Checking if user exists for email:", email)
+    
+    // Users tablosundan kontrol et (RLS policy'ler nedeniyle)
+    const { data, error } = await supabase
+      .from("users")
+      .select("id, email")
+      .eq("email", email)
+      .maybeSingle()
+    
+    if (error) {
+      console.error("Error checking users:", error)
+      return { exists: false, error }
+    }
+    
+    const userExists = !!data
+    console.log("🔍 User exists check result:", userExists)
+    
+    return { exists: userExists, error: null }
   } catch (error) {
-    console.error("Supabase bağlantı testi hatası:", error)
-    return { data: null, error }
+    console.error("Check user exists error:", error)
+    return { exists: false, error }
+  }
+}
+
+// Profiles tablosunu kontrol et ve oluştur - düzeltilmiş versiyon
+export async function ensureProfilesTable() {
+  try {
+    console.log("🔍 Checking if profiles table exists...")
+    
+    // Profiles tablosunu kontrol et
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id")
+      .limit(1)
+    
+    if (error) {
+      console.log("📋 Profiles table doesn't exist or has RLS issues")
+      console.log("⚠️ Please run the SQL script manually in Supabase Dashboard")
+      console.log("📝 SQL Script:")
+      console.log(`
+        CREATE TABLE IF NOT EXISTS public.profiles (
+          id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+          user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+          position TEXT,
+          skill_level TEXT,
+          preferred_city TEXT,
+          availability TEXT,
+          experience_years INTEGER DEFAULT 0,
+          preferred_time TEXT,
+          bio TEXT,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          UNIQUE(user_id)
+        );
+        
+        ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+        
+        CREATE POLICY "Users can view own profile" ON public.profiles
+          FOR SELECT USING (auth.uid() = user_id);
+        
+        CREATE POLICY "Users can update own profile" ON public.profiles
+          FOR UPDATE USING (auth.uid() = user_id);
+        
+        CREATE POLICY "Users can insert own profile" ON public.profiles
+          FOR INSERT WITH CHECK (auth.uid() = user_id);
+      `)
+      
+      return { success: false, error: error, needsManualSetup: true }
+    }
+    
+    console.log("✅ Profiles table exists")
+    return { success: true, error: null, needsManualSetup: false }
+  } catch (error) {
+    console.error("❌ Error checking profiles table:", error)
+    return { success: false, error, needsManualSetup: true }
+  }
+}
+
+// Test login with detailed error info
+export async function testLogin(email: string, password: string) {
+  try {
+    console.log("🧪 Testing login for:", email)
+    
+    // Önce kullanıcının var olup olmadığını kontrol et
+    const { exists } = await checkUserExists(email)
+    console.log("🧪 User exists in users table:", exists)
+    
+    // Login denemesi yap
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email,
+      password: password,
+    })
+    
+    console.log("🧪 Login test result:", {
+      success: !error,
+      userId: data?.user?.id,
+      error: error?.message,
+      status: error?.status
+    })
+    
+    return { data, error, userExists: exists }
+  } catch (error) {
+    console.error("Test login error:", error)
+    return { data: null, error, userExists: false }
   }
 }

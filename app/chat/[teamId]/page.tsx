@@ -9,6 +9,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Send, ArrowLeft, Users, MoreVertical, Phone, Video } from "lucide-react"
 import Link from "next/link"
+import { useAuthContext } from "@/components/AuthProvider"
+import { useRouter } from "next/navigation"
 
 interface Message {
   id: number
@@ -81,6 +83,18 @@ export default function TeamChatPage({ params }: { params: { teamId: string } })
   const [newMessage, setNewMessage] = useState("")
   const [isTyping, setIsTyping] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const { user, loading: authLoading, isAuthenticated } = useAuthContext()
+  const router = useRouter()
+
+  // Authentication kontrolü
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated || !user) {
+      console.log("Kullanıcı giriş yapmamış, login'e yönlendiriliyor");
+      router.push("/auth/login");
+      return;
+    }
+  }, [user, authLoading, isAuthenticated, router]);
 
   const teamName = "Yıldızlar FC"
   const teamMembers: TeamMember[] = [

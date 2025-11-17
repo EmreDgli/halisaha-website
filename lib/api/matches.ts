@@ -253,10 +253,17 @@ export async function getUserMatches() {
     const {
       data: { user },
     } = await supabase.auth.getUser()
-    if (!user) throw new Error("User not authenticated")
+    
+    // Daha güvenli authentication kontrolü
+    if (!user) {
+      console.log("getUserMatches - No authenticated user found")
+      return { data: [], error: null } // Boş array döndür, hata fırlatma
+    }
+
+    console.log("getUserMatches - User authenticated:", user.id)
 
     // Get user's teams first
-    const { data: userTeams } = await supabase
+    const { data: userTeams, error: teamsError } = await supabase
       .from("teams")
       .select("id")
       .or(
@@ -270,11 +277,18 @@ export async function getUserMatches() {
         })`,
       )
 
+    if (teamsError) {
+      console.error("getUserMatches - Error fetching user teams:", teamsError)
+      return { data: [], error: teamsError }
+    }
+
     if (!userTeams || userTeams.length === 0) {
+      console.log("getUserMatches - No teams found for user")
       return { data: [], error: null }
     }
 
     const teamIds = userTeams.map((t) => t.id)
+    console.log("getUserMatches - Team IDs:", teamIds)
 
     const { data, error } = await supabase
       .from("matches")
@@ -287,11 +301,16 @@ export async function getUserMatches() {
       .or(`organizer_team_id.in.(${teamIds.join(",")}),opponent_team_id.in.(${teamIds.join(",")})`)
       .order("match_date", { ascending: false })
 
-    if (error) throw error
+    if (error) {
+      console.error("getUserMatches - Error fetching matches:", error)
+      return { data: [], error }
+    }
 
+    console.log("getUserMatches - Successfully fetched matches:", data?.length || 0)
     return { data, error: null }
   } catch (error) {
-    return { data: null, error }
+    console.error("getUserMatches - Unexpected error:", error)
+    return { data: [], error } // Boş array döndür, uygulama çalışmaya devam etsin
   }
 }
 

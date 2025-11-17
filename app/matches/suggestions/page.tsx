@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { ArrowLeft, Home, Calendar, MapPin, Users, Clock, Star, Trophy, TrendingUp } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Progress } from "@/components/ui/progress"
+import { useAuthContext } from "@/components/AuthProvider"
+import { useRouter } from "next/navigation"
 
 // Mock data for match suggestions
 const mockSuggestions = [
@@ -84,6 +86,18 @@ const mockSuggestions = [
 export default function MatchSuggestionsPage() {
   const [suggestions, setSuggestions] = useState(mockSuggestions)
   const [isLoading, setIsLoading] = useState(false)
+  const { user, loading: authLoading, isAuthenticated } = useAuthContext()
+  const router = useRouter()
+
+  // Authentication kontrolü
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated || !user) {
+      console.log("Kullanıcı giriş yapmamış, login'e yönlendiriliyor");
+      router.push("/auth/login");
+      return;
+    }
+  }, [user, authLoading, isAuthenticated, router]);
 
   const handleSendRequest = async (suggestionId: number) => {
     setIsLoading(true)

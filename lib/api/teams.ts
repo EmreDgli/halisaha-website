@@ -1,6 +1,7 @@
 "use client"
 
 import { supabase } from "../supabase"
+import { createNotification } from "./notifications"
 
 // Create new team
 export async function createTeam(teamData: {
@@ -75,6 +76,45 @@ export async function getTeams(filters?: {
     const { data, error } = await query.order("created_at", { ascending: false })
 
     if (error) throw error
+
+    // Enhance teams with additional data
+    if (data) {
+      const enhancedTeams = await Promise.all(
+        data.map(async (team) => {
+          // Get current participant count
+          const currentMembers = team.members?.length || 0
+          
+          // Get team statistics
+          const statsResult = await getTeamStats(team.id)
+          const stats = statsResult.data
+          
+          return {
+            ...team,
+            currentMembers,
+            maxPlayers: team.max_players || 11,
+            availableSlots: Math.max(0, (team.max_players || 11) - currentMembers),
+            isFull: currentMembers >= (team.max_players || 11),
+            // Team statistics
+            totalMatches: stats?.totalMatches || 0,
+            wins: stats?.wins || 0,
+            draws: stats?.draws || 0,
+            losses: stats?.losses || 0,
+            winRate: stats?.winRate || 0,
+            upcomingMatches: stats?.upcomingMatches || 0,
+            // Recent activity (last 3 matches)
+            recentMatches: stats?.recentMatches?.slice(0, 3) || [],
+            // Last active calculation
+            lastActive: team.updated_at ? 
+              new Date(team.updated_at).toLocaleDateString('tr-TR', { 
+                day: 'numeric', 
+                month: 'short' 
+              }) : 'Yakın zamanda'
+          }
+        })
+      )
+      
+      return { data: enhancedTeams, error: null }
+    }
 
     return { data, error: null }
   } catch (error) {
@@ -176,27 +216,104 @@ export async function getJoinRequestsForManager() {
 
 // Katılma isteğini onayla veya reddet
 export async function handleTeamJoinRequest(requestId: string, approve: boolean) {
-  const status = approve ? 'approved' : 'rejected';
-  // Önce join requesti bul
-  const { data: joinRequest, error: fetchError } = await supabase
-    .from('team_join_requests')
-    .select('*')
-    .eq('id', requestId)
-    .single();
-  if (fetchError || !joinRequest) return { error: fetchError || 'Join request not found' };
+  try {
+    console.log("handleTeamJoinRequest - Starting:", { requestId, approve })
+    
+    // 1. Join request'i bul
+    const { data: joinRequest, error: fetchError } = await supabase
+      .from('team_join_requests')
+      .select(`
+        *,
+        team:teams(name, manager_id),
+        user:users(full_name, email)
+      `)
+      .eq('id', requestId)
+      .single()
+    
+    if (fetchError || !joinRequest) {
+      console.error("handleTeamJoinRequest - Fetch error:", fetchError)
+      return { error: fetchError || 'Join request not found' }
+    }
 
-  // Onaylanırsa üyeler tablosuna ekle
+    console.log("handleTeamJoinRequest - Join request found:", joinRequest)
+
+    const status = approve ? 'approved' : 'rejected'
+
+    // 2. Onaylanırsa kullanıcıyı takıma ekle
     if (approve) {
-    await supabase.from('team_members').insert({
-      team_id: joinRequest.team_id,
-      user_id: joinRequest.user_id,
-    });
+      console.log("handleTeamJoinRequest - Adding user to team")
+      
+      // Kullanıcıyı team_members tablosuna ekle
+      const { error: memberError } = await supabase
+        .from('team_members')
+        .insert({
+          team_id: joinRequest.team_id,
+          user_id: joinRequest.user_id,
+          joined_at: new Date().toISOString(),
+        })
+
+      if (memberError) {
+        console.error("handleTeamJoinRequest - Member insert error:", memberError)
+        return { error: memberError }
+      }
+
+      // 3. Takım üye sayısını güncelle
+      console.log("handleTeamJoinRequest - Updating team member count")
+      const { data: memberCount, error: countError } = await supabase
+        .from('team_members')
+        .select('id', { count: 'exact' })
+        .eq('team_id', joinRequest.team_id)
+
+      if (!countError && memberCount) {
+        await supabase
+          .from('teams')
+          .update({ member_count: memberCount.length })
+          .eq('id', joinRequest.team_id)
+      }
+
+      // 4. Kullanıcıya bildirim gönder
+      console.log("handleTeamJoinRequest - Sending notification to user")
+      await createNotification({
+        user_id: joinRequest.user_id,
+        title: "Takım Katılım İsteği Onaylandı",
+        message: `${joinRequest.team.name} takımına katılım isteğiniz onaylandı! Artık takım üyesi olarak görünüyorsunuz.`,
+        type: "team_join",
+        related_id: joinRequest.team_id,
+      })
+
+      console.log("handleTeamJoinRequest - User successfully added to team")
+    } else {
+      // 5. Reddedilirse kullanıcıya bildirim gönder
+      console.log("handleTeamJoinRequest - Sending rejection notification")
+      await createNotification({
+        user_id: joinRequest.user_id,
+        title: "Takım Katılım İsteği Reddedildi",
+        message: `${joinRequest.team.name} takımına katılım isteğiniz reddedildi.`,
+        type: "team_join",
+        related_id: joinRequest.team_id,
+      })
+    }
+
+    // 6. Join request status'unu güncelle
+    console.log("handleTeamJoinRequest - Updating request status")
+    const { data: updatedRequest, error: updateError } = await supabase
+      .from('team_join_requests')
+      .update({ status })
+      .eq('id', requestId)
+      .select()
+      .single()
+
+    if (updateError) {
+      console.error("handleTeamJoinRequest - Status update error:", updateError)
+      return { error: updateError }
+    }
+
+    console.log("handleTeamJoinRequest - Successfully completed")
+    return { data: updatedRequest, error: null }
+  } catch (error) {
+    console.error("handleTeamJoinRequest - Unexpected error:", error)
+    return { data: null, error }
   }
-  // Status'u güncelle
-  return await supabase
-    .from('team_join_requests')
-    .update({ status })
-    .eq('id', requestId);
 }
 
 // Takımı ve üyeliklerini sil
@@ -229,6 +346,74 @@ export async function getTeamDetails(teamId: string) {
     if (error) throw error
 
     return { data, error: null }
+  } catch (error) {
+    return { data: null, error }
+  }
+}
+
+// Get team statistics
+export async function getTeamStats(teamId: string) {
+  try {
+    // Get team matches
+    const { data: matches, error: matchesError } = await supabase
+      .from("matches")
+      .select(`
+        id,
+        status,
+        match_date,
+        organizer_score,
+        opponent_score,
+        organizer_team_id,
+        opponent_team_id
+      `)
+      .or(`organizer_team_id.eq.${teamId},opponent_team_id.eq.${teamId}`)
+      .order("match_date", { ascending: false })
+
+    if (matchesError) throw matchesError
+
+    // Calculate statistics
+    const totalMatches = matches?.length || 0
+    const wins = matches?.filter(match => {
+      if (match.status === 'completed') {
+        if (match.organizer_team_id === teamId) {
+          return match.organizer_score > match.opponent_score
+        } else {
+          return match.opponent_score > match.organizer_score
+        }
+      }
+      return false
+    }).length || 0
+
+    const draws = matches?.filter(match => {
+      if (match.status === 'completed') {
+        return match.organizer_score === match.opponent_score
+      }
+      return false
+    }).length || 0
+
+    const losses = totalMatches - wins - draws
+    const winRate = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0
+
+    // Get recent activity (last 5 matches)
+    const recentMatches = matches?.slice(0, 5) || []
+
+    // Get upcoming matches
+    const upcomingMatches = matches?.filter(match => 
+      match.status === 'pending' && new Date(match.match_date) > new Date()
+    ).length || 0
+
+    return {
+      data: {
+        totalMatches,
+        wins,
+        draws,
+        losses,
+        winRate,
+        recentMatches,
+        upcomingMatches
+      },
+      error: null
+    }
   } catch (error) {
     return { data: null, error }
   }

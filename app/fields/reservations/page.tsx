@@ -1,11 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { ArrowLeft, Home, Calendar, MapPin, Clock, Phone, Star, ChevronLeft, ChevronRight } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { useAuthContext } from "@/components/AuthProvider"
+import { useRouter } from "next/navigation"
 
 // Mock data for fields and reservations
 const mockFields = [
@@ -64,6 +66,18 @@ export default function FieldReservationsPage() {
     "2024-01-16": ["09:00", "15:00", "19:00", "21:00"],
     "2024-01-17": ["11:00", "16:00", "17:00", "22:00"],
   })
+  const { user, loading: authLoading, isAuthenticated } = useAuthContext()
+  const router = useRouter()
+
+  // Authentication kontrolü
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated || !user) {
+      console.log("Kullanıcı giriş yapmamış, login'e yönlendiriliyor");
+      router.push("/auth/login");
+      return;
+    }
+  }, [user, authLoading, isAuthenticated, router]);
 
   const formatDate = (date: Date) => {
     return date.toISOString().split("T")[0]

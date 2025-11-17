@@ -14,22 +14,32 @@ export function useAuth() {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isInitialized, setIsInitialized] = useState(false)
 
   useEffect(() => {
     // Get initial session
     const getInitialSession = async () => {
       try {
+        console.log("useAuth: Initial session check starting...")
         const { data, error }:any = await getCurrentUser()
         if (error) {
+          console.log("useAuth: Initial session error:", error)
           setError(error.message)
-        } else {
+        } else if (data) {
+          console.log("useAuth: Initial session success:", data)
           setUser(data)
-          localStorage.setItem("userTeams", JSON.stringify(data.teams))
+          if (data.profile?.teams) {
+            localStorage.setItem("userTeams", JSON.stringify(data.profile.teams))
+          }
+        } else {
+          console.log("useAuth: No initial session found")
         }
       } catch (err) {
+        console.log("useAuth: Initial session exception:", err)
         setError(err instanceof Error ? err.message : "Authentication error")
       } finally {
         setLoading(false)
+        setIsInitialized(true)
       }
     }
 
@@ -39,24 +49,31 @@ export function useAuth() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth state changed:", event, session?.user?.id)
+      console.log("useAuth: Auth state changed:", event, session?.user?.id)
 
       if (session?.user) {
         try {
+          console.log("useAuth: Session found, getting user data...")
           const { data, error }:any = await getCurrentUser()
           if (error) {
+            console.log("useAuth: GetCurrentUser error:", error)
             setError(error.message)
             setUser(null)
-          } else {
+          } else if (data) {
+            console.log("useAuth: GetCurrentUser success:", data)
             setUser(data)
             setError(null)
-            localStorage.setItem("userTeams", JSON.stringify(data.teams))
+            if (data.profile?.teams) {
+              localStorage.setItem("userTeams", JSON.stringify(data.profile.teams))
+            }
           }
         } catch (err) {
+          console.log("useAuth: GetCurrentUser exception:", err)
           setError(err instanceof Error ? err.message : "Authentication error")
           setUser(null)
         }
       } else {
+        console.log("useAuth: No session, clearing user")
         setUser(null)
         setError(null)
       }
@@ -75,5 +92,6 @@ export function useAuth() {
     loading,
     error,
     isAuthenticated: !!user,
+    isInitialized,
   }
 }

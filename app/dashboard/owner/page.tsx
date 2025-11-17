@@ -5,11 +5,12 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Calendar, DollarSign, Plus, Clock, MapPin, Video, Upload, Eye, Star, Home } from "lucide-react"
+import { Calendar, DollarSign, Plus, Clock, MapPin, Video, Upload, Eye, Star, Home, User } from "lucide-react"
 import Link from "next/link"
 import { getOwnerFields } from "@/lib/api/fields"
 import { logoutUser } from '@/lib/api/auth'
 import { useRouter } from 'next/navigation'
+import { useAuthContext } from "@/components/AuthProvider"
 
 interface MatchVideo {
   id: number
@@ -34,6 +35,38 @@ export default function OwnerDashboard() {
   const [fieldsLoading, setFieldsLoading] = useState(true)
   const [fieldsError, setFieldsError] = useState("")
   const router = useRouter()
+  const { user, loading: authLoading, isAuthenticated, isInitialized } = useAuthContext()
+
+  useEffect(() => {
+    if (!authLoading && isInitialized && !isAuthenticated) {
+      console.log("Unauthenticated user, redirecting to login");
+      router.push("/auth/login");
+    }
+  }, [authLoading, isInitialized, isAuthenticated, router]);
+
+  // Show loading state while auth is loading
+  if (authLoading || !isInitialized) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-4"></div>
+          <p className="text-green-600">Yükleniyor...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show loading state if not authenticated
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-4"></div>
+          <p className="text-green-600">Giriş yapılıyor...</p>
+        </div>
+      </div>
+    )
+  }
 
   const [upcomingBookings] = useState([
     {
@@ -133,6 +166,12 @@ export default function OwnerDashboard() {
             </div>
           </div>
           <div className="flex items-center space-x-4">
+            <Link href="/profile">
+              <Button variant="outline" size="sm" className="border-blue-600 text-blue-600 hover:bg-blue-50">
+                <User className="w-4 h-4 mr-2" />
+                Profilim
+              </Button>
+            </Link>
             <Link href="/videos">
               <Button variant="outline" size="sm">
                 <Video className="w-4 h-4 mr-2" />
