@@ -76,7 +76,7 @@ export async function searchPlayersForTeams(filters?: {
           preferred_time
         )
       `)
-      .eq("roles", "player")
+      .contains("roles", ["player"])
       .limit(100)
 
     // Filtreleri uygula

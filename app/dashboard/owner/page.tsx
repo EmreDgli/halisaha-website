@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Calendar, DollarSign, Plus, Clock, MapPin, Video, Upload, Eye, Star, Home, User } from "lucide-react"
 import Link from "next/link"
-import { getOwnerFields } from "@/lib/api/fields"
+import { getOwnerFields, getFieldReservations } from "@/lib/api/fields"
 import { logoutUser } from '@/lib/api/auth'
 import { useRouter } from 'next/navigation'
 import { useAuthContext } from "@/components/AuthProvider"
@@ -30,10 +30,23 @@ interface MatchVideo {
   }
 }
 
+interface BookingSummary {
+  id: string | number
+  fieldName: string
+  team: string
+  startTime?: string
+  endTime?: string
+  amount?: number
+  status?: string
+}
+
 export default function OwnerDashboard() {
   const [myFields, setMyFields] = useState<any[]>([])
   const [fieldsLoading, setFieldsLoading] = useState(true)
   const [fieldsError, setFieldsError] = useState("")
+  const [upcomingBookings, setUpcomingBookings] = useState<BookingSummary[]>([])
+  const [bookingsLoading, setBookingsLoading] = useState(false)
+  const [bookingsError, setBookingsError] = useState("")
   const router = useRouter()
   const { user, loading: authLoading, isAuthenticated, isInitialized } = useAuthContext()
 
@@ -67,27 +80,6 @@ export default function OwnerDashboard() {
       </div>
     )
   }
-
-  const [upcomingBookings] = useState([
-    {
-      id: 1,
-      field: "Merkez Halı Saha",
-      team: "Yıldızlar FC vs Galibiyetspor",
-      date: "2024-01-15",
-      time: "19:00-20:30",
-      amount: 300,
-      status: "confirmed",
-    },
-    {
-      id: 2,
-      field: "Spor Kompleksi",
-      team: "Şampiyonlar vs Dostluk SK",
-      date: "2024-01-16",
-      time: "20:00-21:30",
-      amount: 375,
-      status: "pending",
-    },
-  ])
 
   const [myVideos] = useState<MatchVideo[]>([
     {
@@ -146,6 +138,143 @@ export default function OwnerDashboard() {
     }
     loadFields()
   }, [])
+
+  useEffect(() => {
+    if (fieldsLoading || !isAuthenticated) return
+
+    let isMounted = true
+
+    const loadUpcomingBookings = async () => {
+      setBookingsLoading(true)
+      setBookingsError("")
+
+      if (!myFields.length) {
+        if (isMounted) {
+          setUpcomingBookings([])
+          setBookingsLoading(false)
+        }
+        return
+      }
+
+      try {
+        const reservationsByField = await Promise.all(
+          myFields.map(async (field) => {
+            try {
+              const reservations = await getFieldReservations(field.id)
+              return { field, reservations: reservations || [] }
+            } catch (error) {
+              console.error("Rezervasyonlar yüklenirken hata:", error)
+              return { field, reservations: [] }
+            }
+          })
+        )
+
+        const now = new Date()
+        const normalized = reservationsByField.flatMap(({ field, reservations }) =>
+          (reservations || []).map((reservation: any) => ({
+            id: reservation.id,
+            fieldName: field.name,
+            team:
+              reservation.title ||
+              reservation.team_name ||
+              reservation.contact_name ||
+              "Rezerve",
+            startTime: reservation.start_time,
+            endTime: reservation.end_time,
+            amount:
+              Number(
+                reservation.amount ??
+                  reservation.price ??
+                  reservation.total_price ??
+                  field.hourly_rate
+              ) || undefined,
+            status: reservation.status || "pending",
+          }))
+        )
+
+        const upcoming = normalized
+          .filter((booking) => booking.startTime && new Date(booking.startTime) >= now)
+          .sort(
+            (a, b) =>
+              new Date(a.startTime || 0).getTime() - new Date(b.startTime || 0).getTime()
+          )
+          .slice(0, 5)
+
+        if (isMounted) {
+          setUpcomingBookings(upcoming)
+        }
+      } catch (error) {
+        console.error("Yaklaşan rezervasyonlar yüklenirken hata:", error)
+        if (isMounted) {
+          setBookingsError("Rezervasyonlar yüklenemedi.")
+          setUpcomingBookings([])
+        }
+      } finally {
+        if (isMounted) {
+          setBookingsLoading(false)
+        }
+      }
+    }
+
+    loadUpcomingBookings()
+
+    return () => {
+      isMounted = false
+    }
+  }, [myFields, fieldsLoading, isAuthenticated])
+
+  const formatBookingDate = (iso?: string) => {
+    if (!iso) return "-"
+    try {
+      return new Date(iso).toLocaleDateString("tr-TR", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      })
+    } catch {
+      return "-"
+    }
+  }
+
+  const formatBookingTimeRange = (start?: string, end?: string) => {
+    if (!start) return "-"
+    try {
+      const startLabel = new Date(start).toLocaleTimeString("tr-TR", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+      if (!end) return startLabel
+      const endLabel = new Date(end).toLocaleTimeString("tr-TR", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+      return `${startLabel} - ${endLabel}`
+    } catch {
+      return "-"
+    }
+  }
+
+  const getStatusLabel = (status?: string) => {
+    if (!status) return "Bekliyor"
+    const map: Record<string, string> = {
+      confirmed: "Onaylandı",
+      pending: "Bekliyor",
+      cancelled: "İptal",
+      completed: "Tamamlandı",
+    }
+    return map[status] || status
+  }
+
+  const getStatusVariant = (status?: string) => {
+    switch (status) {
+      case "confirmed":
+        return "default"
+      case "cancelled":
+        return "destructive"
+      default:
+        return "secondary"
+    }
+  }
 
   const handleLogout = async () => {
     await logoutUser()
@@ -303,26 +432,37 @@ export default function OwnerDashboard() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {upcomingBookings.map((booking) => (
-                    <div key={booking.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                      <div className="space-y-1">
-                        <div className="font-medium">{booking.team}</div>
-                        <div className="text-sm text-gray-600">{booking.field}</div>
-                        <div className="flex items-center text-sm text-gray-500">
-                          <Clock className="w-4 h-4 mr-1" />
-                          {booking.date} - {booking.time}
+                {bookingsLoading ? (
+                  <div className="text-center text-green-600 py-6">Rezervasyonlar yükleniyor...</div>
+                ) : bookingsError ? (
+                  <div className="text-center text-red-600 py-6">{bookingsError}</div>
+                ) : upcomingBookings.length === 0 ? (
+                  <div className="text-center text-gray-500 py-6">Yaklaşan rezervasyon bulunmuyor.</div>
+                ) : (
+                  <div className="space-y-4">
+                    {upcomingBookings.map((booking) => (
+                      <div key={booking.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                        <div className="space-y-1">
+                          <div className="font-medium">{booking.team}</div>
+                          <div className="text-sm text-gray-600">{booking.fieldName}</div>
+                          <div className="flex items-center text-sm text-gray-500">
+                            <Clock className="w-4 h-4 mr-1" />
+                            {formatBookingDate(booking.startTime)} •{" "}
+                            {formatBookingTimeRange(booking.startTime, booking.endTime)}
+                          </div>
+                        </div>
+                        <div className="text-right space-y-1">
+                          <div className="font-semibold text-green-600">
+                            {booking.amount ? `₺${booking.amount}` : "-"}
+                          </div>
+                          <Badge variant={getStatusVariant(booking.status)}>
+                            {getStatusLabel(booking.status)}
+                          </Badge>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className="font-semibold text-green-600">₺{booking.amount}</div>
-                        <Badge variant={booking.status === "confirmed" ? "default" : "secondary"}>
-                          {booking.status === "confirmed" ? "Onaylandı" : "Bekliyor"}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -459,42 +599,53 @@ export default function OwnerDashboard() {
           <TabsContent value="bookings" className="space-y-6">
             <h2 className="text-2xl font-bold text-green-800">Rezervasyon Yönetimi</h2>
 
-            <div className="space-y-4">
-              {upcomingBookings.map((booking) => (
-                <Card key={booking.id} className="shadow-lg">
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-2">
-                        <div className="font-semibold text-lg">{booking.team}</div>
-                        <div className="text-sm text-gray-600">{booking.field}</div>
-                        <div className="flex items-center space-x-4 text-sm text-gray-600">
-                          <div className="flex items-center">
-                            <Clock className="w-4 h-4 mr-1" />
-                            {booking.date} - {booking.time}
+            {bookingsLoading ? (
+              <div className="text-center text-green-600 py-8">Rezervasyonlar yükleniyor...</div>
+            ) : bookingsError ? (
+              <div className="text-center text-red-600 py-8">{bookingsError}</div>
+            ) : upcomingBookings.length === 0 ? (
+              <div className="text-center text-gray-500 py-8">Henüz yaklaşan rezervasyon bulunmuyor.</div>
+            ) : (
+              <div className="space-y-4">
+                {upcomingBookings.map((booking) => (
+                  <Card key={booking.id} className="shadow-lg">
+                    <CardContent className="p-6">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-2">
+                          <div className="font-semibold text-lg">{booking.team}</div>
+                          <div className="text-sm text-gray-600">{booking.fieldName}</div>
+                          <div className="flex items-center space-x-4 text-sm text-gray-600">
+                            <div className="flex items-center">
+                              <Clock className="w-4 h-4 mr-1" />
+                              {formatBookingDate(booking.startTime)} •{" "}
+                              {formatBookingTimeRange(booking.startTime, booking.endTime)}
+                            </div>
+                            <div className="font-semibold text-green-600">
+                              {booking.amount ? `₺${booking.amount}` : "-"}
+                            </div>
                           </div>
-                          <div className="font-semibold text-green-600">₺{booking.amount}</div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Badge variant={getStatusVariant(booking.status)}>
+                            {getStatusLabel(booking.status)}
+                          </Badge>
+                          {booking.status === "pending" && (
+                            <div className="space-x-2">
+                              <Button size="sm" variant="outline">
+                                Reddet
+                              </Button>
+                              <Button size="sm" className="bg-green-600 hover:bg-green-700">
+                                Onayla
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </div>
-                      <div className="flex items-center space-x-2">
-                        <Badge variant={booking.status === "confirmed" ? "default" : "secondary"}>
-                          {booking.status === "confirmed" ? "Onaylandı" : "Bekliyor"}
-                        </Badge>
-                        {booking.status === "pending" && (
-                          <div className="space-x-2">
-                            <Button size="sm" variant="outline">
-                              Reddet
-                            </Button>
-                            <Button size="sm" className="bg-green-600 hover:bg-green-700">
-                              Onayla
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </TabsContent>
 
           <TabsContent value="videos" className="space-y-6">

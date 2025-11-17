@@ -66,6 +66,7 @@ export default function PlayerSearchPage() {
 
   const { user } = useAuthContext()
   const { toast } = useToast()
+  const userCity = user?.profile?.city || user?.profile?.preferred_city || ""
 
   // Kullanıcının takımını getir
   useEffect(() => {
@@ -84,10 +85,25 @@ export default function PlayerSearchPage() {
     loadPlayers()
   }, [])
 
-  const loadPlayers = async () => {
+// Kullanıcının bulunduğu şehre göre listeyi filtrele
+useEffect(() => {
+  if (userCity) {
+    setFilters((prev) => (prev.city === userCity ? prev : { ...prev, city: userCity }))
+    loadPlayers({ city: userCity })
+  }
+}, [userCity])
+
+  const loadPlayers = async (overrideFilters?: Partial<Filters>) => {
     setIsLoading(true)
     try {
-      const result = await searchPlayersForTeams()
+      const appliedFilters = { ...filters, ...overrideFilters }
+      const apiFilters = {
+        position: appliedFilters.position || undefined,
+        skillLevel: appliedFilters.skillLevel || undefined,
+        city: appliedFilters.city || undefined,
+        availability: appliedFilters.availability || undefined,
+      }
+      const result = await searchPlayersForTeams(apiFilters)
       if (result.data) {
         setPlayers(result.data as unknown as Player[])
         setFilteredPlayers(result.data as unknown as Player[])
